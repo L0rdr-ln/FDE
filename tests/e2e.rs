@@ -2988,8 +2988,8 @@ fn the_real_compositor_keeps_a_window_drawing_at_a_steady_rate() {
     std::env::set_var("XDG_RUNTIME_DIR", dir.path());
     let home = dir.path().join("home");
     std::fs::create_dir_all(&home).unwrap();
-    let mut fde = std::process::Command::new("xvfb-run")
-        .args(["-a", "-s", "-screen 0 1024x768x24"])
+    let mut fde = std::process::Command::new("xvfb-run");
+    fde.args(["-a", "-s", "-screen 0 1024x768x24"])
         .arg(env!("CARGO_BIN_EXE_fde"))
         .env("XDG_RUNTIME_DIR", dir.path())
         .env("HOME", &home)
@@ -3001,15 +3001,19 @@ fn the_real_compositor_keeps_a_window_drawing_at_a_steady_rate() {
         .env_remove("WAYLAND_DISPLAY")
         .env_remove("DBUS_SESSION_BUS_ADDRESS")
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .unwrap();
+        .stderr(std::process::Stdio::null());
+    // a process group of its own, so the X server and the task bar can be stopped with it
+    std::os::unix::process::CommandExt::process_group(&mut fde, 0);
+    let mut fde = fde.spawn().unwrap();
+    let stop = |fde: &mut std::process::Child| {
+        unsafe { libc::kill(-(fde.id() as i32), libc::SIGTERM) };
+        let _ = fde.wait();
+    };
     let socket = dir.path().join("wayland-1");
     let t0 = Instant::now();
     while !socket.exists() {
         if t0.elapsed() > Duration::from_secs(30) || fde.try_wait().unwrap().is_some() {
-            let _ = fde.kill();
-            let _ = fde.wait();
+            stop(&mut fde);
             eprintln!("the compositor did not start here (no usable display): real compositor test skipped");
             return;
         }
@@ -3061,9 +3065,7 @@ fn the_real_compositor_keeps_a_window_drawing_at_a_steady_rate() {
     }
     let frames = app.frames;
     drop(conn);
-    unsafe { libc::kill(fde.id() as i32, libc::SIGTERM) };
-    let _ = fde.wait();
-    let _ = std::process::Command::new("pkill").args(["-f", env!("CARGO_BIN_EXE_fde")]).status();
+    stop(&mut fde);
     eprintln!("the real compositor showed {frames} frames in {seconds} s");
     assert!(frames >= 10 * seconds as u32, "a window that draws all the time must get many frames a second, got {frames} in {seconds} s");
 }
