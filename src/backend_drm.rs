@@ -100,6 +100,16 @@ fn render_and_queue(state: &mut Fde, gpu: &mut Gpu, idx: usize) {
             window.send_frame(&og.output, elapsed, Some(Duration::ZERO), |_, _| Some(og.output.clone()));
         }
     }
+    // panels, menus and the lock screen wait for "frame shown" too
+    for layer in smithay::desktop::layer_map_for_output(&og.output).layers() {
+        layer.send_frame(&og.output, elapsed, Some(Duration::ZERO), |_, _| Some(og.output.clone()));
+    }
+    for (output, lock) in &state.lock_surfaces {
+        if output == &og.output {
+            smithay::desktop::utils::send_frames_surface_tree(lock.wl_surface(), output, elapsed, Some(Duration::ZERO), |_, _| Some(output.clone()));
+        }
+    }
+    let _ = state.display_handle.flush_clients();
 }
 
 /// A connected monitor and what to show on it.
@@ -386,6 +396,8 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
 
     while state.running {
         event_loop.dispatch(Some(Duration::from_millis(16)), &mut state)?;
+        // send what this round produced (key presses, pointer motion) to the programs now
+        let _ = state.display_handle.flush_clients();
         if crate::shell::termination_requested() {
             tracing::info!("asked to terminate: ending the session");
             state.running = false;

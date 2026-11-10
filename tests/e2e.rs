@@ -2929,3 +2929,141 @@ fn frame_time_bench() {
     open_window(&mut hn, dir.path(), "fde-e2e-bench", 500, 350);
     time(&mut hn, "3 windows", &mut renderer, &mut scene);
 }
+
+// ------------------------------------------------------------------ the real program
+
+use wayland_client::protocol::wl_callback;
+
+#[derive(Default)]
+struct FpsApp {
+    configured: bool,
+    frames: u32,
+    frame_done: bool,
+}
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for FpsApp {
+    fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+}
+delegate_noop!(FpsApp: ignore wl_compositor::WlCompositor);
+delegate_noop!(FpsApp: ignore wl_surface::WlSurface);
+delegate_noop!(FpsApp: ignore wl_shm::WlShm);
+delegate_noop!(FpsApp: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(FpsApp: ignore wl_buffer::WlBuffer);
+delegate_noop!(FpsApp: ignore xdg_toplevel::XdgToplevel);
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for FpsApp {
+    fn event(_: &mut Self, wm: &xdg_wm_base::XdgWmBase, event: xdg_wm_base::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm.pong(serial);
+        }
+    }
+}
+impl Dispatch<xdg_surface::XdgSurface, ()> for FpsApp {
+    fn event(app: &mut Self, s: &xdg_surface::XdgSurface, event: xdg_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            s.ack_configure(serial);
+            app.configured = true;
+        }
+    }
+}
+impl Dispatch<wl_callback::WlCallback, ()> for FpsApp {
+    fn event(app: &mut Self, _: &wl_callback::WlCallback, event: wl_callback::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let wl_callback::Event::Done { .. } = event {
+            app.frames += 1;
+            app.frame_done = true;
+        }
+    }
+}
+
+/// The tests above drive the compositor's state by hand; this one starts the real `fde` program
+/// (nested, under Xvfb) with its own main loop. A window that draws a frame whenever the last one
+/// was shown must get many frames a second: once, events to programs were only sent out when a
+/// program happened to talk first, and such a window got none at all.
+#[test]
+fn the_real_compositor_keeps_a_window_drawing_at_a_steady_rate() {
+    if std::process::Command::new("xvfb-run").arg("--help").output().is_err() {
+        eprintln!("no xvfb-run here: real compositor test skipped");
+        return;
+    }
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let mut fde = std::process::Command::new("xvfb-run")
+        .args(["-a", "-s", "-screen 0 1024x768x24"])
+        .arg(env!("CARGO_BIN_EXE_fde"))
+        .env("XDG_RUNTIME_DIR", dir.path())
+        .env("HOME", &home)
+        .env("LIBGL_ALWAYS_SOFTWARE", "1")
+        .env("FDE_NO_XWAYLAND", "1")
+        .env("FDE_NO_POLKIT", "1")
+        .env("FDE_NO_NOTIFY", "1")
+        .env("FDE_CONFIG", dir.path().join("none.toml"))
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DBUS_SESSION_BUS_ADDRESS")
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let socket = dir.path().join("wayland-1");
+    let t0 = Instant::now();
+    while !socket.exists() {
+        if t0.elapsed() > Duration::from_secs(30) || fde.try_wait().unwrap().is_some() {
+            let _ = fde.kill();
+            let _ = fde.wait();
+            eprintln!("the compositor did not start here (no usable display): real compositor test skipped");
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    std::thread::sleep(Duration::from_millis(1500)); // the task bar comes up
+
+    let conn = Connection::from_socket(UnixStream::connect(&socket).unwrap()).unwrap();
+    let (globals, mut queue) = registry_queue_init::<FpsApp>(&conn).unwrap();
+    let qh = queue.handle();
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=4, ()).unwrap();
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+    let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=1, ()).unwrap();
+    let mut app = FpsApp::default();
+    let surface = compositor.create_surface(&qh, ());
+    let xs = wm.get_xdg_surface(&surface, &qh, ());
+    let _top = xs.get_toplevel(&qh, ());
+    surface.commit();
+    let t0 = Instant::now();
+    while !app.configured {
+        queue.roundtrip(&mut app).unwrap();
+        assert!(t0.elapsed() < Duration::from_secs(10), "no configure from the real compositor");
+    }
+    let (w, h) = (200, 120);
+    let mut file = tempfile::tempfile_in(dir.path()).unwrap();
+    file.write_all(&vec![0xc0u8; (w * h * 4) as usize]).unwrap();
+    use std::os::fd::{AsFd, AsRawFd};
+    let pool = shm.create_pool(file.as_fd(), w * h * 4, &qh, ());
+    let buffer = pool.create_buffer(0, w, h, w * 4, wl_shm::Format::Argb8888, &qh, ());
+    let seconds = 3;
+    let t0 = Instant::now();
+    app.frame_done = true;
+    while t0.elapsed() < Duration::from_secs(seconds) {
+        if app.frame_done {
+            app.frame_done = false;
+            surface.frame(&qh, ());
+            surface.attach(Some(&buffer), 0, 0);
+            surface.damage_buffer(0, 0, w, h);
+            surface.commit();
+        }
+        conn.flush().unwrap();
+        if let Some(guard) = queue.prepare_read() {
+            let mut fds = [libc::pollfd { fd: guard.connection_fd().as_raw_fd(), events: libc::POLLIN, revents: 0 }];
+            if unsafe { libc::poll(fds.as_mut_ptr(), 1, 100) } > 0 {
+                let _ = guard.read();
+            }
+        }
+        queue.dispatch_pending(&mut app).unwrap();
+    }
+    let frames = app.frames;
+    drop(conn);
+    unsafe { libc::kill(fde.id() as i32, libc::SIGTERM) };
+    let _ = fde.wait();
+    let _ = std::process::Command::new("pkill").args(["-f", env!("CARGO_BIN_EXE_fde")]).status();
+    eprintln!("the real compositor showed {frames} frames in {seconds} s");
+    assert!(frames >= 10 * seconds as u32, "a window that draws all the time must get many frames a second, got {frames} in {seconds} s");
+}

@@ -80,6 +80,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut stats = crate::redraw::FrameStats::default();
     while state.running {
         event_loop.dispatch(Some(Duration::from_millis(16)), &mut state)?;
+        // send what this round produced (key presses, pointer motion, "frame shown") to the
+        // programs now; without this they only got it when one of them happened to talk first
+        let _ = state.display_handle.flush_clients();
         if crate::shell::termination_requested() {
             tracing::info!("asked to terminate: ending the session");
             state.running = false;
@@ -123,9 +126,19 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
                 Some(state.output.clone())
             });
         }
+        // panels, menus and the lock screen wait for "frame shown" too
+        for output in state.all_outputs() {
+            for layer in smithay::desktop::layer_map_for_output(&output).layers() {
+                layer.send_frame(&output, state.start_time.elapsed(), Some(Duration::ZERO), |_, _| Some(output.clone()));
+            }
+        }
+        for (output, lock) in &state.lock_surfaces {
+            smithay::desktop::utils::send_frames_surface_tree(lock.wl_surface(), output, state.start_time.elapsed(), Some(Duration::ZERO), |_, _| Some(output.clone()));
+        }
         let _ = now;
         backend.submit(Some(&[full_damage(size)]))?;
         stats.add(render_time, t_present.elapsed());
+        let _ = state.display_handle.flush_clients();
     }
     Ok(())
 }
