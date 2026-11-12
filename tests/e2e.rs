@@ -1843,6 +1843,7 @@ fn an_x11_program_gets_a_managed_window_that_can_be_closed() {
     let mut display: Display<Fde> = Display::new().unwrap();
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     state.config.appearance.animations = false;
+    state.config.shell.remember_windows = false; // xterm's place stays out of the home folder
     let mut ev: EventLoop<Fde> = EventLoop::try_new().unwrap();
     fde::xwayland::start(ev.handle(), &display.handle());
     let mut step = |state: &mut Fde, display: &mut Display<Fde>, ev: &mut EventLoop<Fde>| {
@@ -2296,6 +2297,7 @@ fn x11_clipboard_session() -> Option<(Display<Fde>, Fde, smithay::reexports::cal
     let display: Display<Fde> = Display::new().unwrap();
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     state.config.appearance.animations = false;
+    state.config.shell.remember_windows = false;
     let ev: EventLoop<'static, Fde> = EventLoop::try_new().unwrap();
     fde::xwayland::start(ev.handle(), &display.handle());
     Some((display, state, ev, dir))
