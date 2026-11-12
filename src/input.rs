@@ -30,6 +30,7 @@ enum Action {
     ToggleDnd,
     ToggleHelp,
     WindowMenu,
+    Tile,
     MenuKey(i32, bool, bool),
     CloseHelp,
     Restore,
@@ -56,6 +57,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+1 .. 9", "go to a workspace (Shift: send the window there)"),
     ("Alt+Ctrl+Left / Right", "previous or next workspace"),
     ("Windows key", "open the start menu"),
+    ("Alt+T", "tile the windows side by side (again: put them back)"),
     ("Alt+Space", "the window menu (or right-click a title bar)"),
     ("Alt+L", "lock the screen"),
     ("Alt+N", "do not disturb on or off"),
@@ -165,6 +167,7 @@ impl Fde {
                                 keysyms::KEY_m | keysyms::KEY_M => Some(Action::Restore),
                                 keysyms::KEY_l | keysyms::KEY_L => Some(Action::Lock),
                                 keysyms::KEY_n | keysyms::KEY_N => Some(Action::ToggleDnd),
+                                keysyms::KEY_t | keysyms::KEY_T => Some(Action::Tile),
                                 keysyms::KEY_Left => Some(Action::Snap(crate::windows::Snap::Left)),
                                 keysyms::KEY_Right => Some(Action::Snap(crate::windows::Snap::Right)),
                                 keysyms::KEY_Up => Some(Action::Up),
@@ -261,6 +264,7 @@ impl Fde {
                 }
             }
             Action::MenuKey(step, enter, escape) => self.window_menu_key(step, enter, escape),
+            Action::Tile => self.toggle_tiling(),
             Action::CloseHelp => self.help_open = false,
             Action::Restore => self.restore_window(),
             Action::Lock => crate::shell::start_sibling("fde-lock"),

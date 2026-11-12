@@ -264,6 +264,11 @@ impl Fde {
     }
 
     /// Give the window this client rectangle (its size is asked of the program, its place is ours).
+    /// Put the window at `rect` (its client area), asking the program for that size.
+    pub fn place_client(&mut self, window: &Window, rect: Rectangle<i32, Logical>) {
+        self.set_client_rect(window, rect);
+    }
+
     fn set_client_rect(&mut self, window: &Window, rect: Rectangle<i32, Logical>) {
         if let Some(top) = window.toplevel() {
             top.with_pending_state(|s| s.size = Some(rect.size));

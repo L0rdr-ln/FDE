@@ -35,6 +35,7 @@ pub mod state;
 pub mod switcher;
 pub mod text;
 pub mod theme;
+pub mod tiling;
 pub mod wallpaper;
 pub mod windows;
 pub mod winmenu;

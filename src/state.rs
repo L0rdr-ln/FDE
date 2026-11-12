@@ -132,6 +132,8 @@ pub struct Fde {
     pub help_open: bool,
     /// the window menu (right click on a title bar, Alt+Space), while it is open
     pub window_menu: Option<crate::winmenu::WindowMenu>,
+    /// what the last Alt+T tiled, and where each window was (and whether it was maximized) before
+    pub tiled_before: Option<Vec<(Window, Rectangle<i32, Logical>, bool)>>,
     /// where each program's window was last closed
     pub placements: crate::placement::Placements,
     /// the press that opened or used the window menu: its release goes to nobody
@@ -352,6 +354,7 @@ impl Fde {
             redraw_serial: 1,
             help_open: false,
             window_menu: None,
+            tiled_before: None,
             placements: crate::placement::load(),
             swallow_release: false,
             switcher_commit: false,

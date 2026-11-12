@@ -3844,3 +3844,43 @@ fn a_program_reopens_where_its_window_was_closed() {
     assert!(g.loc.x < 800 && g.loc.y < 600, "placed on the monitor instead: {g:?}");
     std::env::remove_var("XDG_STATE_HOME");
 }
+
+#[test]
+fn alt_t_tiles_the_windows_side_by_side_and_again_puts_them_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-tile").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    for (w, h) in [(300, 200), (250, 180), (200, 150)] {
+        open_window(&mut hn, dir.path(), "fde-e2e-tile", w, h);
+    }
+    let windows: Vec<_> = hn.state.space.elements().cloned().collect();
+    hn.state.set_maximized(&windows[0], true);
+    let front = hn.state.space.elements().last().cloned().unwrap();
+    let order: Vec<_> = hn.state.space.elements().cloned().collect();
+    let before: Vec<_> = windows.iter().map(|w| (hn.state.space.element_geometry(w).unwrap().loc, hn.state.is_maximized(w))).collect();
+
+    hn.state.toggle_tiling();
+    let area = hn.state.usable_area(&hn.state.output.clone());
+    let outers: Vec<_> = windows.iter().map(|w| hn.state.outer_of(w).unwrap()).collect();
+    for (i, a) in outers.iter().enumerate() {
+        assert!(area.contains_rect(*a), "window {i} {a:?} is on the screen");
+        for b in &outers[i + 1..] {
+            assert!(!a.overlaps(*b), "{a:?} and {b:?} do not overlap");
+        }
+    }
+    assert!(!hn.state.is_maximized(&windows[0]), "the maximized one joined the grid");
+    let fo = hn.state.outer_of(&front).unwrap();
+    assert!(outers.iter().all(|o| (o.loc.y, o.loc.x) >= (fo.loc.y, fo.loc.x)), "the front window is at the top left");
+    let asked = front.toplevel().unwrap().with_pending_state(|s| s.size).unwrap();
+    assert!(asked.w > 300 && asked.h > 200, "asked to fill its cell: {asked:?}");
+
+    hn.state.toggle_tiling();
+    let after: Vec<_> = windows.iter().map(|w| (hn.state.space.element_geometry(w).unwrap().loc, hn.state.is_maximized(w))).collect();
+    assert_eq!(after, before, "Alt+T again: every window back, the maximized one maximized");
+    assert_eq!(hn.state.space.elements().cloned().collect::<Vec<_>>(), order, "and in the same order front to back");
+}
