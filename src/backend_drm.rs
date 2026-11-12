@@ -34,7 +34,7 @@ use smithay::utils::{DeviceFd, Transform};
 
 use crate::glass::Glass;
 use crate::render::create_scene;
-use crate::state::{ClientState, Fde};
+use crate::state::Fde;
 
 type Compositor = DrmCompositor<
     GbmAllocator<DrmDeviceFd>,

@@ -14,7 +14,7 @@ use smithay::utils::{Rectangle, Transform};
 
 use crate::glass::Glass;
 use crate::render::create_scene;
-use crate::state::{ClientState, Fde};
+use crate::state::Fde;
 
 pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut event_loop: EventLoop<Fde> = EventLoop::try_new()?;

@@ -250,6 +250,27 @@ impl XwmHandler for Fde {
         }
     }
 
-    fn resize_request(&mut self, _: XwmId, _: X11Surface, _: u32, _: ResizeEdge) {}
-    fn move_request(&mut self, _: XwmId, _: X11Surface, _: u32) {}
+    // a program with its own title bar (Chrome, say) asks to be moved or resized
+    fn resize_request(&mut self, _: XwmId, surface: X11Surface, _button: u32, edge: ResizeEdge) {
+        let e = |left, right, top, bottom| crate::state::Edges { left, right, top, bottom };
+        let edges = match edge {
+            ResizeEdge::Left => e(true, false, false, false),
+            ResizeEdge::Right => e(false, true, false, false),
+            ResizeEdge::Top => e(false, false, true, false),
+            ResizeEdge::Bottom => e(false, false, false, true),
+            ResizeEdge::TopLeft => e(true, false, true, false),
+            ResizeEdge::TopRight => e(false, true, true, false),
+            ResizeEdge::BottomLeft => e(true, false, false, true),
+            ResizeEdge::BottomRight => e(false, true, false, true),
+        };
+        if let Some(s) = surface.wl_surface() {
+            self.begin_client_drag(&s, None, Some(edges));
+        }
+    }
+
+    fn move_request(&mut self, _: XwmId, surface: X11Surface, _button: u32) {
+        if let Some(s) = surface.wl_surface() {
+            self.begin_client_drag(&s, None, None);
+        }
+    }
 }

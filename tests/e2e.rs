@@ -3293,3 +3293,170 @@ fn a_second_program_can_neither_take_over_the_lock_nor_unlock_the_screen() {
     }
     owner.join().unwrap();
 }
+
+// ------------------------------------------------------------------ programs that draw their own frame
+
+#[derive(Default)]
+struct CsdApp {
+    configured: bool,
+    top: Option<xdg_toplevel::XdgToplevel>,
+    seat: Option<wl_seat::WlSeat>,
+    pressed: Option<u32>,
+    tx: Option<mpsc::Sender<CsdMsg>>,
+}
+#[derive(Debug, PartialEq)]
+enum CsdMsg {
+    Mapped,
+    Enter(f64, f64),
+    AskedToMove { late: bool },
+}
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for CsdApp {
+    fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+}
+delegate_noop!(CsdApp: ignore wl_compositor::WlCompositor);
+delegate_noop!(CsdApp: ignore wl_surface::WlSurface);
+delegate_noop!(CsdApp: ignore wl_shm::WlShm);
+delegate_noop!(CsdApp: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(CsdApp: ignore wl_buffer::WlBuffer);
+delegate_noop!(CsdApp: ignore wl_seat::WlSeat);
+delegate_noop!(CsdApp: ignore xdg_toplevel::XdgToplevel);
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for CsdApp {
+    fn event(_: &mut Self, wm: &xdg_wm_base::XdgWmBase, event: xdg_wm_base::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm.pong(serial);
+        }
+    }
+}
+impl Dispatch<xdg_surface::XdgSurface, ()> for CsdApp {
+    fn event(app: &mut Self, s: &xdg_surface::XdgSurface, event: xdg_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            s.ack_configure(serial);
+            app.configured = true;
+        }
+    }
+}
+impl Dispatch<wl_pointer::WlPointer, ()> for CsdApp {
+    fn event(app: &mut Self, _: &wl_pointer::WlPointer, event: wl_pointer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        let tx = app.tx.clone().unwrap();
+        match event {
+            wl_pointer::Event::Enter { surface_x, surface_y, .. } => {
+                let _ = tx.send(CsdMsg::Enter(surface_x, surface_y));
+            }
+            // like GTK: a press on our own title bar asks the compositor to move the window
+            wl_pointer::Event::Button { serial, state: wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed), .. } => {
+                app.top.as_ref().unwrap()._move(app.seat.as_ref().unwrap(), serial);
+                app.pressed = Some(serial);
+                let _ = tx.send(CsdMsg::AskedToMove { late: false });
+            }
+            // and, unlike GTK, tries again after the button is up (which must not work)
+            wl_pointer::Event::Button { state: wayland_client::WEnum::Value(wl_pointer::ButtonState::Released), .. } => {
+                if let Some(serial) = app.pressed.take() {
+                    app.top.as_ref().unwrap()._move(app.seat.as_ref().unwrap(), serial);
+                    let _ = tx.send(CsdMsg::AskedToMove { late: true });
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// A window like GTK draws it: no decoration object (so it draws its own title bar) and a 20 px
+/// shadow around it that is part of the buffer but not of the window.
+fn csd_client(path: std::path::PathBuf, tx: mpsc::Sender<CsdMsg>, stop: Arc<std::sync::atomic::AtomicBool>) {
+    let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
+    let (globals, mut queue) = registry_queue_init::<CsdApp>(&conn).unwrap();
+    let qh = queue.handle();
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=4, ()).unwrap();
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+    let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=1, ()).unwrap();
+    let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=1, ()).unwrap();
+    let mut app = CsdApp { tx: Some(tx.clone()), ..Default::default() };
+    let surface = compositor.create_surface(&qh, ());
+    let xs = wm.get_xdg_surface(&surface, &qh, ());
+    let top = xs.get_toplevel(&qh, ());
+    xs.set_window_geometry(20, 20, 300, 200);
+    surface.commit();
+    while !app.configured {
+        queue.blocking_dispatch(&mut app).unwrap();
+    }
+    let (w, h) = (340, 240);
+    let mut file = tempfile::tempfile_in(std::env::var("XDG_RUNTIME_DIR").unwrap()).unwrap();
+    file.write_all(&vec![0x80u8; (w * h * 4) as usize]).unwrap();
+    use std::os::fd::AsFd;
+    let pool = shm.create_pool(file.as_fd(), w * h * 4, &qh, ());
+    let buffer = pool.create_buffer(0, w, h, w * 4, wl_shm::Format::Argb8888, &qh, ());
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let _pointer = seat.get_pointer(&qh, ());
+    app.top = Some(top);
+    app.seat = Some(seat);
+    queue.roundtrip(&mut app).unwrap();
+    tx.send(CsdMsg::Mapped).unwrap();
+    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+        queue.blocking_dispatch(&mut app).ok();
+    }
+}
+
+#[test]
+fn a_program_with_its_own_title_bar_gets_no_second_one_and_can_move_itself() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-csd").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: true };
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let path = dir.path().join("fde-e2e-csd");
+    let s2 = stop.clone();
+    std::thread::spawn(move || csd_client(path, tx, s2));
+    let next = |hn: &mut Harness, rx: &mpsc::Receiver<CsdMsg>| -> CsdMsg {
+        let t0 = Instant::now();
+        loop {
+            hn.pump();
+            if let Ok(m) = rx.try_recv() {
+                return m;
+            }
+            assert!(t0.elapsed() < Duration::from_secs(10), "the program said nothing");
+            std::thread::sleep(Duration::from_millis(3));
+        }
+    };
+    assert_eq!(next(&mut hn, &rx), CsdMsg::Mapped);
+    hn.pump_for(50);
+    let win = hn.state.space.elements().next().cloned().expect("the window");
+
+    // no frame of ours around it: its outline is its own
+    assert!(!hn.state.has_frame(&win), "a window that draws its own title bar gets none from FDE");
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    assert_eq!(g.size, (300, 200).into());
+    assert_eq!(hn.state.outer_of(&win), Some(g));
+
+    // the pointer 10 px into the window is 30 px into the buffer (the 20 px shadow comes first)
+    let at = |x: i32, y: i32| (x as f64 + 0.5, y as f64 + 0.5).into();
+    hn.state.pointer_moved(at(g.loc.x + 10, g.loc.y + 10), 1);
+    match next(&mut hn, &rx) {
+        CsdMsg::Enter(x, y) => assert!((x - 30.5).abs() < 0.01 && (y - 30.5).abs() < 0.01, "entered at {x},{y}, not 30.5,30.5"),
+        m => panic!("expected the pointer to enter, got {m:?}"),
+    }
+
+    // a press on its title bar: it asks to be moved, and the window follows the pointer
+    hn.state.pointer_button(0x110, true, 2);
+    assert_eq!(next(&mut hn, &rx), CsdMsg::AskedToMove { late: false });
+    hn.pump_for(30);
+    assert!(hn.state.drag.is_some(), "the move the program asked for began");
+    hn.state.pointer_moved(at(g.loc.x + 60, g.loc.y + 40), 3);
+    let moved = hn.state.space.element_geometry(&win).unwrap();
+    assert_eq!(moved.loc, g.loc + smithay::utils::Point::from((50, 30)));
+    hn.state.pointer_button(0x110, false, 4);
+    assert!(hn.state.drag.is_none(), "letting go ends the move");
+
+    // asking again once the button is up does nothing
+    assert_eq!(next(&mut hn, &rx), CsdMsg::AskedToMove { late: true });
+    hn.pump_for(30);
+    assert!(hn.state.drag.is_none(), "a program cannot start a move without a press it holds");
+    hn.state.pointer_moved(at(g.loc.x + 200, g.loc.y + 150), 5);
+    assert_eq!(hn.state.space.element_geometry(&win).unwrap().loc, moved.loc, "the window stays put");
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+}

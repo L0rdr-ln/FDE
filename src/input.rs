@@ -8,7 +8,9 @@ use smithay::backend::input::{
 use smithay::desktop::WindowSurfaceType;
 use smithay::input::keyboard::{keysyms, FilterResult};
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent};
-use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
+use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
+use smithay::reexports::wayland_server::Resource;
+use smithay::utils::{Logical, Point, Rectangle, Serial, SERIAL_COUNTER};
 use smithay::wayland::shell::wlr_layer::{KeyboardInteractivity, Layer};
 
 use crate::layout::{Button, Hit};
@@ -323,10 +325,12 @@ impl Fde {
         } else {
             match &under {
                 Some((window, client, Hit::Client)) => {
-                    let local = pos - client.loc.to_f64();
+                    // the program's (0,0) is the corner of its buffer, which lies outside the window
+                    // when the program draws its own shadow (GTK): the window starts at geometry().loc
+                    let origin = client.loc - window.geometry().loc;
                     window
-                        .surface_under(local, WindowSurfaceType::ALL)
-                        .map(|(s, loc)| (s, (client.loc + loc).to_f64()))
+                        .surface_under(pos - origin.to_f64(), WindowSurfaceType::ALL)
+                        .map(|(s, loc)| (s, (origin + loc).to_f64()))
                 }
                 Some(_) => None,
                 None => self
@@ -360,6 +364,12 @@ impl Fde {
                 self.release_wobbles();
                 if let Drag::Move { window, .. } = drag {
                     self.snap_if_at_edge(&window);
+                }
+                // a drag the program asked for began inside its press: it gets the release, which
+                // also ends that press's hold on the pointer
+                if let Some(ptr) = self.seat.get_pointer().filter(|p| p.is_grabbed()) {
+                    ptr.button(self, &ButtonEvent { button, state: ButtonState::Released, serial, time });
+                    ptr.frame(self);
                 }
                 return;
             }
@@ -415,7 +425,36 @@ impl Fde {
         }
     }
 
-    fn start_move(&mut self, window: &smithay::desktop::Window, client: Rectangle<i32, Logical>) {
+    /// A program asked to be moved or resized from its own title bar or border (`edges`). Only
+    /// while the button of that press is still down, and only for the program that got the press:
+    /// a program cannot start dragging itself (or another window) under a pointer it does not hold.
+    /// X11 programs send no serial (`None`): then any press still held on the program counts.
+    pub fn begin_client_drag(&mut self, surface: &WlSurface, serial: Option<Serial>, edges: Option<Edges>) {
+        if self.locked || self.drag.is_some() {
+            return;
+        }
+        let Some(ptr) = self.seat.get_pointer() else { return };
+        if !ptr.is_grabbed() || serial.is_some_and(|s| !ptr.has_grab(s)) {
+            return;
+        }
+        let pressed_on_it = ptr
+            .grab_start_data()
+            .and_then(|d| d.focus)
+            .map(|(s, _)| s.client() == surface.client())
+            .unwrap_or(false);
+        if !pressed_on_it {
+            return;
+        }
+        let Some(window) = self.window_for_surface(surface) else { return };
+        let Some(client) = self.space.element_geometry(&window) else { return };
+        match edges {
+            None => self.start_move(&window, client),
+            Some(e) => self.start_resize(&window, e, client),
+        }
+        self.request_redraw();
+    }
+
+    pub fn start_move(&mut self, window: &smithay::desktop::Window, client: Rectangle<i32, Logical>) {
         if self.is_maximized(window) {
             self.set_maximized(window, false);
             return;
@@ -436,7 +475,7 @@ impl Fde {
         self.drag = Some(Drag::Move { window: window.clone(), grab_offset });
     }
 
-    fn start_resize(&mut self, window: &smithay::desktop::Window, edges: Edges, client: Rectangle<i32, Logical>) {
+    pub fn start_resize(&mut self, window: &smithay::desktop::Window, edges: Edges, client: Rectangle<i32, Logical>) {
         if self.is_maximized(window) {
             return;
         }

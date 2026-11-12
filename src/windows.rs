@@ -8,6 +8,10 @@ use smithay::reexports::wayland_protocols::xdg::shell::server::xdg_toplevel;
 use smithay::reexports::wayland_server::protocol::wl_surface::WlSurface;
 use smithay::utils::{Logical, Point, Rectangle, SERIAL_COUNTER};
 
+use smithay::reexports::wayland_protocols::xdg::decoration::zv1::server::zxdg_toplevel_decoration_v1::Mode as DecoMode;
+use smithay::desktop::space::SpaceElement as _;
+
+use crate::glass::GlassStyle;
 use crate::layout::{client_rect, hit, outer_rect, Hit};
 use crate::state::{Fde, WinInfo};
 
@@ -58,10 +62,34 @@ impl Fde {
         window.x11_surface().map(|x| x.is_override_redirect()).unwrap_or(false)
     }
 
+    /// Does FDE draw this window's frame (title bar, orbs, glass border)? Yes for X11 windows that
+    /// do not draw their own, and for Wayland windows that agreed to server-side decorations
+    /// (foot, Qt, Firefox). A program that never asks (GTK) draws its own title bar: two would be
+    /// one too many.
+    pub fn has_frame(&self, window: &Window) -> bool {
+        if let Some(x) = window.x11_surface() {
+            return !x.is_override_redirect() && !x.is_decorated();
+        }
+        window
+            .toplevel()
+            .map(|t| t.with_pending_state(|s| s.decoration_mode == Some(DecoMode::ServerSide)))
+            .unwrap_or(false)
+    }
+
+    /// The frame measurements for `window`: the theme's, or none for a window without a frame.
+    pub fn frame_style(&self, window: &Window) -> GlassStyle {
+        if self.has_frame(window) {
+            self.style
+        } else {
+            GlassStyle { border: 0.0, titlebar: 0.0, ..self.style }
+        }
+    }
+
     /// Open a new window: cascaded position, focused, on top.
     pub fn map_new_window(&mut self, window: Window) {
-        let b = self.style.border as i32;
-        let t = self.style.titlebar as i32;
+        let style = self.frame_style(&window);
+        let b = style.border as i32;
+        let t = style.titlebar as i32;
         let step = 32;
         let origin = 70 + self.cascade;
         self.cascade = (self.cascade + step) % (6 * step);
@@ -141,6 +169,15 @@ impl Fde {
             let Some(g) = self.space.element_geometry(w) else { continue };
             if self.is_fullscreen(w) || self.is_override_redirect(w) {
                 if g.to_f64().contains(p) {
+                    return Some((w.clone(), g, Hit::Client));
+                }
+                continue;
+            }
+            if !self.has_frame(w) {
+                // the program's own pixels decide, shadow margin included: GTK puts its resize
+                // edges there
+                let origin = g.loc - w.geometry().loc;
+                if w.is_in_input_region(&(p - origin.to_f64())) {
                     return Some((w.clone(), g, Hit::Client));
                 }
                 continue;
@@ -258,7 +295,7 @@ impl Fde {
                 i.snapped = Some(geo);
             }
         }
-        let rect = client_rect(outer, &self.style);
+        let rect = client_rect(outer, &self.frame_style(window));
         self.set_client_rect(window, rect);
     }
 
@@ -300,7 +337,7 @@ impl Fde {
         }
         if on {
             let screen = self.usable_area(&self.output_for_window(window));
-            let target = client_rect(screen, &self.style);
+            let target = client_rect(screen, &self.frame_style(window));
             info(window).lock().unwrap().restore = Some(geo);
             if let Some(top) = &top {
                 top.with_pending_state(|s| {
@@ -383,7 +420,7 @@ impl Fde {
     /// The window's frame and shadow room as the spring grid sees it (logical, shared space).
     fn wobble_rect(&self, window: &Window) -> Option<Rectangle<f64, Logical>> {
         let g = self.space.element_geometry(window)?;
-        let o = outer_rect(g, &self.style);
+        let o = outer_rect(g, &self.frame_style(window));
         let m = 24.0;
         Some(Rectangle::new(
             (o.loc.x as f64 - m, o.loc.y as f64 - m).into(),
@@ -508,7 +545,7 @@ impl Fde {
     }
 
     pub fn outer_of(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
-        self.space.element_geometry(window).map(|g| outer_rect(g, &self.style))
+        self.space.element_geometry(window).map(|g| outer_rect(g, &self.frame_style(window)))
     }
 }
 

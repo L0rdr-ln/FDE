@@ -177,6 +177,27 @@ impl XdgShellHandler for Fde {
         surface.send_repositioned(token);
     }
 
+    fn move_request(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, serial: Serial) {
+        self.begin_client_drag(surface.wl_surface(), Some(serial), None);
+    }
+
+    fn resize_request(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, serial: Serial, edges: xdg_toplevel::ResizeEdge) {
+        use xdg_toplevel::ResizeEdge as R;
+        let e = |left, right, top, bottom| crate::state::Edges { left, right, top, bottom };
+        let edges = match edges {
+            R::Left => e(true, false, false, false),
+            R::Right => e(false, true, false, false),
+            R::Top => e(false, false, true, false),
+            R::Bottom => e(false, false, false, true),
+            R::TopLeft => e(true, false, true, false),
+            R::TopRight => e(false, true, true, false),
+            R::BottomLeft => e(true, false, false, true),
+            R::BottomRight => e(false, true, false, true),
+            _ => return,
+        };
+        self.begin_client_drag(surface.wl_surface(), Some(serial), Some(edges));
+    }
+
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(w) = self.window_for_surface(surface.wl_surface()) {
             self.set_maximized(&w, true);

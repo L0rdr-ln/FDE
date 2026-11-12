@@ -344,7 +344,8 @@ impl Fde {
                 let progress = self.open_progress(window);
                 let e = crate::windows::ease_out(progress);
                 let (mut alpha, mut zoom): (f32, f64) = (e, 0.92 + 0.08 * e as f64);
-                let outer_full = outer_rect(client, &self.style);
+                let framed = self.has_frame(window);
+                let outer_full = outer_rect(client, &self.frame_style(window));
                 if outer_full.intersection(out_rect).is_none() {
                     continue; // on another monitor
                 }
@@ -405,7 +406,7 @@ impl Fde {
                     .as_ref()
                     .and_then(|f| window.wl_surface().map(|s| &*s == f))
                     .unwrap_or(false);
-                let style = GlassStyle { focus: if focused { 1.0 } else { 0.0 }, ..self.style }.scaled(view.scale as f32);
+                let style = GlassStyle { focus: if focused { 1.0 } else { 0.0 }, ..self.frame_style(window) }.scaled(view.scale as f32);
 
                 // what is behind the window, blurred
                 let margin = sc(24, view.scale);
@@ -415,6 +416,10 @@ impl Fde {
                 )
                 .intersection(full)
                 .unwrap_or(visible);
+                // (a window that draws its own frame gets no glass behind it)
+                let backdrop = if !framed {
+                    None
+                } else {
                 let blurred = glass.blur(renderer, scene, region, if self.fast_mode() { 1 } else { style.blur_levels })?;
                 let bs = blurred.size();
                 let src = Rectangle::<f64, BufferCoord>::new(
@@ -429,6 +434,8 @@ impl Fde {
                     )
                         .into(),
                 );
+                Some((blurred, src))
+                };
 
                 // the client's surfaces (and its popups) as render elements; a surface of
                 // logical size L is L * scale * zoom pixels
@@ -458,7 +465,7 @@ impl Fde {
                 ));
 
                 // the title (re-rendered only when it, its room or the focus change)
-                let title_draw = self.title_texture(renderer, window, &style, outer_d, focused, view.scale)?;
+                let title_draw = if framed { self.title_texture(renderer, window, &style, outer_d, focused, view.scale)? } else { None };
 
                 let to_texture = tmp.is_some();
                 let target_tex: &mut GlesTexture = match tmp.as_mut() {
@@ -470,10 +477,12 @@ impl Fde {
                 if to_texture {
                     frame.clear(Color32F::new(0.0, 0.0, 0.0, 0.0), &[clip])?;
                 }
-                if !self.fast_mode() {
-                    glass.draw_shadow(&mut frame, &blurred, outer_d, &style, view.scale as f32, alpha)?;
+                if let Some((blurred, src)) = &backdrop {
+                    if !self.fast_mode() {
+                        glass.draw_shadow(&mut frame, blurred, outer_d, &style, view.scale as f32, alpha)?;
+                    }
+                    glass.draw_panel_part(&mut frame, blurred, *src, outer_d, &style, alpha)?;
                 }
-                glass.draw_panel_part(&mut frame, &blurred, src, outer_d, &style, alpha)?;
                 if let Some((tex, dest)) = &title_draw {
                     let src_full = Rectangle::<f64, BufferCoord>::from_size((tex.size().w as f64, tex.size().h as f64).into());
                     frame.render_texture_from_to(tex, src_full, *dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, alpha, None, &[])?;
