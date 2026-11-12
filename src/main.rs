@@ -3,8 +3,13 @@ use fde::{backend_drm, backend_winit, demo, glass};
 use smithay::utils::Rectangle;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    tracing_subscriber::fmt::init();
     let args: Vec<String> = std::env::args().collect();
+    // the report alone, without the graphics libraries' own messages
+    if matches!(args.get(1).map(String::as_str), Some("--check") | Some("check")) {
+        fde::check::run_checks(std::path::Path::new("/sys")).print();
+        return Ok(());
+    }
+    tracing_subscriber::fmt::init();
     match args.get(1).map(String::as_str) {
         Some("glass-demo") => {
             let out = args.get(2).map(String::as_str).unwrap_or("glass-demo.png");
@@ -38,7 +43,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         _ => {
-            eprintln!("usage: fde [winit|drm]        run nested in a window (winit) or on the hardware (drm); default: by environment\n       fde glass-demo [out.png]");
+            eprintln!("usage: fde [winit|drm]        run nested in a window (winit) or on the hardware (drm); default: by environment\n       fde --check           what FDE would find (GPU, monitors, seat, programs); changes nothing\n       fde glass-demo [out.png]");
             std::process::exit(2);
         }
     }

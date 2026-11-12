@@ -134,6 +134,7 @@ cargo run -- glass-demo glass-demo.png    # render the demo scene offscreen
 
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): what is written here and what is reused
 - [docs/ROADMAP.md](docs/ROADMAP.md): the stages, what is done
+- [docs/HARDWARE.md](docs/HARDWARE.md): running on the screen itself (from a console), `fde --check`, what to do when it does not start
 - [docs/SETTINGS.md](docs/SETTINGS.md): the plan for the control panel and the one config file
 - [CONTRIBUTING.md](CONTRIBUTING.md): building, testing, house rules
 

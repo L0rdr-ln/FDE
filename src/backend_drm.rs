@@ -22,7 +22,7 @@ use smithay::backend::renderer::element::Kind;
 use smithay::backend::renderer::gles::{GlesRenderer, GlesTexture};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session};
-use smithay::backend::udev::{primary_gpu, UdevBackend, UdevEvent};
+use smithay::backend::udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode, PostAction};
 use smithay::output::Output;
@@ -68,6 +68,10 @@ fn render_and_queue(state: &mut Fde, gpu: &mut Gpu, idx: usize) {
     let Gpu { renderer, glass, outputs } = gpu;
     let Some(og) = outputs.get_mut(idx) else { return };
     if og.queued || !state.needs_redraw(og.drawn, og.last_draw) {
+        return;
+    }
+    // another console has the screen: nothing can be shown until it is ours again
+    if state.session.as_ref().is_some_and(|s| !smithay::backend::session::Session::is_active(s)) {
         return;
     }
     og.drawn = state.redraw_serial;
@@ -280,15 +284,21 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("seat {seat_name}");
 
     // --- the GPU
-    let gpu_path = primary_gpu(&seat_name)?.ok_or("no GPU found for this seat")?;
+    // the GPU the firmware showed the boot screen on, else any (some virtual machines mark none)
+    let gpu_path = match primary_gpu(&seat_name)? {
+        Some(p) => p,
+        None => all_gpus(&seat_name)?.into_iter().next().ok_or("no GPU found for this seat (is /dev/dri/card0 there? `fde --check` tells more)")?,
+    };
     tracing::info!("GPU {}", gpu_path.display());
     let fd = session.open(&gpu_path, OFlags::RDWR | OFlags::CLOEXEC | OFlags::NOCTTY | OFlags::NONBLOCK)?;
     let drm_fd = DrmDeviceFd::new(DeviceFd::from(fd));
     let (drm, drm_notifier) = DrmDevice::new(drm_fd.clone(), true)?;
     let gbm = GbmDevice::new(drm_fd.clone())?;
-    let egl = unsafe { EGLDisplay::new(gbm.clone())? };
-    let context = EGLContext::new(&egl)?;
-    let mut renderer = unsafe { GlesRenderer::new(context)? };
+    const NO_GL: &str = "no OpenGL ES on this GPU. In a VMware or VirtualBox VM: switch on 3D acceleration in the VM's display settings \
+        (and install the guest tools); else try LIBGL_ALWAYS_SOFTWARE=1. `fde --check` tells more";
+    let egl = unsafe { EGLDisplay::new(gbm.clone()) }.map_err(|e| format!("EGL: {e}: {NO_GL}"))?;
+    let context = EGLContext::new(&egl).map_err(|e| format!("EGL context: {e}: {NO_GL}"))?;
+    let mut renderer = unsafe { GlesRenderer::new(context) }.map_err(|e| format!("GLES: {e}: {NO_GL}"))?;
 
     // --- every connected monitor, each on a CRTC of its own
     let config = crate::config::Config::load().unwrap_or_default();
@@ -347,16 +357,37 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
     let libinput_backend = LibinputInputBackend::new(libinput.clone());
     event_loop.handle().insert_source(libinput_backend, |event, _, state| state.process_input_event(event))?;
 
-    // --- the session coming and going (virtual terminal switches)
+    // --- the session coming and going (virtual terminal switches): while another console has
+    // the screen, the GPU is not ours; coming back, every monitor starts over with a full frame
     let mut libinput_for_session = libinput.clone();
-    event_loop.handle().insert_source(session_notifier, move |event, _, _state| match event {
+    let (gpu_session, hw_session) = (gpu.clone(), hw.clone());
+    event_loop.handle().insert_source(session_notifier, move |event, _, state| match event {
         SessionEvent::PauseSession => {
             libinput_for_session.suspend();
+            hw_session.drm.borrow_mut().pause();
             tracing::info!("session paused");
         }
         SessionEvent::ActivateSession => {
             if libinput_for_session.resume().is_err() {
                 tracing::error!("cannot resume the input devices");
+            }
+            if let Err(e) = hw_session.drm.borrow_mut().activate(false) {
+                tracing::error!("cannot take the GPU back: {e}");
+            }
+            let mut g = gpu_session.borrow_mut();
+            for og in g.outputs.iter_mut() {
+                if let Err(e) = og.compositor.reset_state() {
+                    tracing::warn!("monitor {}: {e}", og.output.name());
+                }
+                og.queued = false;
+            }
+            // monitors may have changed while away
+            drop(g);
+            rescan(state, &mut gpu_session.borrow_mut(), &hw_session);
+            state.request_redraw();
+            let mut g = gpu_session.borrow_mut();
+            for idx in 0..g.outputs.len() {
+                render_and_queue(state, &mut g, idx);
             }
             tracing::info!("session active");
         }

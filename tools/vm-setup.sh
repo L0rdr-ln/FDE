@@ -89,10 +89,11 @@ sudo usermod -aG _seatd "$USER" 2>/dev/null || sudo usermod -aG seat "$USER" 2>/
 
 cat <<DONE
 
-Done. Start it with:  ~/start-fde
+Done. Check what FDE finds:  ~/fde/target/release/fde --check
+Start it with:  ~/start-fde
  - in a desktop session it opens as a window (nested)
  - on a console (Ctrl+Alt+F3, log in) it takes over the screen; if it says it cannot open the
-   seat, log out and in once (the seatd group was just added) or run it with sudo
+   seat, log out and in once (the seatd group was just added); docs/HARDWARE.md has more
 Keys: Windows key start menu, Alt+Return terminal, Alt+drag move, Alt+right-drag resize, Alt+Esc quit, Alt+Tab cycle, Alt+f maximize, Alt+l lock,
 Ctrl+Alt+F1..F12 switch console.
 DONE
