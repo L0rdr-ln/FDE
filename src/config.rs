@@ -144,11 +144,13 @@ pub struct Shell {
     pub autostart: Vec<String>,
     /// start a graphical password prompt for programs that need administrator rights (polkit), if one is installed
     pub polkit_agent: bool,
+    /// open each program's window where it was last closed
+    pub remember_windows: bool,
 }
 
 impl Default for Shell {
     fn default() -> Self {
-        Shell { terminal: "foot".into(), launcher: String::new(), panel: true, autostart: Vec::new(), polkit_agent: true }
+        Shell { terminal: "foot".into(), launcher: String::new(), panel: true, autostart: Vec::new(), polkit_agent: true, remember_windows: true }
     }
 }
 

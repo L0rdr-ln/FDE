@@ -3740,3 +3740,105 @@ fn right_clicking_a_title_bar_opens_the_window_menu_and_its_rows_work() {
     hn.state.pointer_button(0x110, false, 0);
     assert!(hn.state.close_requested(&a), "Close asked the program to close");
 }
+
+/// Like `client`, but the program names itself (`app_id`), so FDE can remember its window.
+fn named_client(path: std::path::PathBuf, tx: mpsc::Sender<Msg>, app_id: &'static str, w: i32, h: i32) {
+    let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
+    let (globals, mut queue) = registry_queue_init::<App>(&conn).unwrap();
+    let qh = queue.handle();
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=4, ()).unwrap();
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+    let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=1, ()).unwrap();
+    let deco: zxdg_decoration_manager_v1::ZxdgDecorationManagerV1 = globals.bind(&qh, 1..=1, ()).unwrap();
+    let mut app = App::default();
+    let surface = compositor.create_surface(&qh, ());
+    let xs = wm.get_xdg_surface(&surface, &qh, ());
+    let top = xs.get_toplevel(&qh, ());
+    top.set_app_id(app_id.into());
+    let _d = deco.get_toplevel_decoration(&top, &qh, ());
+    surface.commit();
+    while !app.configured {
+        queue.blocking_dispatch(&mut app).unwrap();
+    }
+    let mut file = tempfile::tempfile_in(std::env::var("XDG_RUNTIME_DIR").unwrap()).unwrap();
+    file.write_all(&vec![0x80u8; (w * h * 4) as usize]).unwrap();
+    use std::os::fd::AsFd;
+    let pool = shm.create_pool(file.as_fd(), w * h * 4, &qh, ());
+    let buffer = pool.create_buffer(0, w, h, w * 4, wl_shm::Format::Argb8888, &qh, ());
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    queue.roundtrip(&mut app).unwrap();
+    tx.send(Msg::Mapped { server_side: app.server_side }).unwrap();
+    let t0 = Instant::now();
+    while !app.closed && t0.elapsed() < Duration::from_secs(20) {
+        queue.blocking_dispatch(&mut app).ok();
+    }
+    tx.send(Msg::Closed).ok();
+}
+
+#[test]
+fn a_program_reopens_where_its_window_was_closed() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    std::env::set_var("XDG_STATE_HOME", dir.path().join("state"));
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-place").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let open = |hn: &mut Harness| -> (smithay::desktop::Window, mpsc::Receiver<Msg>) {
+        let (tx, rx) = mpsc::channel();
+        let path = dir.path().join("fde-e2e-place");
+        std::thread::spawn(move || named_client(path, tx, "org.example.Remember", 300, 200));
+        let t0 = Instant::now();
+        loop {
+            hn.pump();
+            if let Ok(Msg::Mapped { .. }) = rx.try_recv() {
+                break;
+            }
+            assert!(t0.elapsed() < Duration::from_secs(10), "no window");
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        hn.pump_for(50);
+        (hn.state.space.elements().last().cloned().unwrap(), rx)
+    };
+    let close = |hn: &mut Harness, w: &smithay::desktop::Window, rx: &mpsc::Receiver<Msg>| {
+        hn.state.close_window(w);
+        let t0 = Instant::now();
+        while hn.state.space.elements().count() > 0 {
+            hn.pump();
+            let _ = rx.try_recv();
+            assert!(t0.elapsed() < Duration::from_secs(10), "the window did not close");
+            std::thread::sleep(Duration::from_millis(3));
+        }
+    };
+
+    // first time: wherever FDE puts new windows; the user moves it and closes it
+    let (w, rx) = open(&mut hn);
+    hn.state.space.map_element(w.clone(), (260, 170), false);
+    close(&mut hn, &w, &rx);
+    let file = std::fs::read_to_string(dir.path().join("state/fde/windows")).expect("the place was saved");
+    assert!(file.starts_with("org.example.Remember\t260\t170\t300\t200\t0"), "{file}");
+
+    // next time it opens right there
+    let (w, rx) = open(&mut hn);
+    assert_eq!(hn.state.space.element_geometry(&w).unwrap().loc, (260, 170).into(), "reopened where it was closed");
+
+    // maximized when closed: maximized again, and Restore brings back the old place
+    hn.state.set_maximized(&w, true);
+    close(&mut hn, &w, &rx);
+    let (w, _rx) = open(&mut hn);
+    assert!(hn.state.is_maximized(&w), "it was maximized when closed");
+    hn.state.set_maximized(&w, false);
+    assert_eq!(hn.state.space.element_geometry(&w).unwrap().loc, (260, 170).into());
+
+    // a place that is off every monitor now (one that was unplugged) is not used
+    std::fs::write(dir.path().join("state/fde/windows"), "org.example.Remember\t5000\t5000\t300\t200\t0\n").unwrap();
+    hn.state.placements = fde::placement::load();
+    assert!(hn.state.placements.get("org.example.Remember").is_some(), "read back from the file");
+    let (w2, _rx2) = open(&mut hn);
+    let g = hn.state.space.element_geometry(&w2).unwrap();
+    assert!(g.loc.x < 800 && g.loc.y < 600, "placed on the monitor instead: {g:?}");
+    std::env::remove_var("XDG_STATE_HOME");
+}

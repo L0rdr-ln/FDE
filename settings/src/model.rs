@@ -47,11 +47,12 @@ pub fn keyboard(layout: &str, repeat_rate: u32, repeat_delay: u32) -> Vec<(&'sta
     ]
 }
 
-pub fn shell(terminal: &str, launcher: &str, panel: bool) -> Vec<(&'static str, Setting)> {
+pub fn shell(terminal: &str, launcher: &str, panel: bool, remember_windows: bool) -> Vec<(&'static str, Setting)> {
     vec![
         ("shell.terminal", Setting::Str(terminal.trim().to_string())),
         ("shell.launcher", Setting::Str(launcher.trim().to_string())),
         ("shell.panel", Setting::Bool(panel)),
+        ("shell.remember_windows", Setting::Bool(remember_windows)),
     ]
 }
 
@@ -182,7 +183,7 @@ mod tests {
         let f = dir.path().join("fde.toml");
         set(&f, &appearance(&hex_color(1.0, 0.5, 0.0), 0.61234, 4, 0.5, false)).unwrap();
         set(&f, &keyboard(" de ", 30, 400)).unwrap();
-        set(&f, &shell("alacritty", "", false)).unwrap();
+        set(&f, &shell("alacritty", "", false, true)).unwrap();
         set(&f, &session(10)).unwrap();
         set(&f, &music(true, " /home/me/Music ", 0.456, true)).unwrap();
         set(&f, &wallpaper(" /tmp/a.png ", "tile")).unwrap();

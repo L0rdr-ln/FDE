@@ -54,6 +54,8 @@ impl CompositorHandler for Fde {
             window.on_commit();
             if let Some(top) = window.toplevel() {
                 if !top.is_initial_configure_sent() {
+                    // the program has said what it is by now: open it where it was last
+                    self.restore_placement(&window);
                     top.send_configure();
                 }
             }
@@ -254,6 +256,7 @@ impl XdgShellHandler for Fde {
         let sid = smithay::reexports::wayland_server::Resource::id(surface.wl_surface());
         self.titles.retain(|(id, _), _| *id != sid);
         if let Some(w) = self.window_for_surface(surface.wl_surface()) {
+            self.remember_placement(&w);
             self.space.unmap_elem(&w);
         }
         self.minimized.retain(|w| w.toplevel().map(|t| t != &surface).unwrap_or(true));

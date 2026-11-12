@@ -322,6 +322,11 @@ impl Fde {
         }
     }
 
+    /// Where a snapped window goes back to.
+    pub fn snapped_rect(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        info(window).lock().unwrap().snapped
+    }
+
     /// Where a maximized window goes back to.
     pub fn restore_rect(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         info(window).lock().unwrap().restore

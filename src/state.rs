@@ -132,6 +132,8 @@ pub struct Fde {
     pub help_open: bool,
     /// the window menu (right click on a title bar, Alt+Space), while it is open
     pub window_menu: Option<crate::winmenu::WindowMenu>,
+    /// where each program's window was last closed
+    pub placements: crate::placement::Placements,
     /// the press that opened or used the window menu: its release goes to nobody
     pub swallow_release: bool,
     /// Alt was let go while the switcher was open: commit after the key event is handled
@@ -350,6 +352,7 @@ impl Fde {
             redraw_serial: 1,
             help_open: false,
             window_menu: None,
+            placements: crate::placement::load(),
             swallow_release: false,
             switcher_commit: false,
             super_alone: false,

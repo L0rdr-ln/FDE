@@ -456,9 +456,12 @@ fn shell_page(cfg: &Config, status: &Status) -> GBox {
     let panel = gtk4::Switch::new();
     panel.set_active(cfg.shell.panel);
     panel.set_halign(Align::Start);
-    let (t2, l2, p2, s2) = (terminal.clone(), launcher.clone(), panel.clone(), status.clone());
+    let remember = gtk4::Switch::new();
+    remember.set_active(cfg.shell.remember_windows);
+    remember.set_halign(Align::Start);
+    let (t2, l2, p2, r2, s2) = (terminal.clone(), launcher.clone(), panel.clone(), remember.clone(), status.clone());
     let save = debounced(move || {
-        s2.report(config::set(&path(), &model::shell(&t2.text(), &l2.text(), p2.is_active())));
+        s2.report(config::set(&path(), &model::shell(&t2.text(), &l2.text(), p2.is_active(), r2.is_active())));
     });
     for e in [&terminal, &launcher] {
         let s = save.clone();
@@ -466,9 +469,12 @@ fn shell_page(cfg: &Config, status: &Status) -> GBox {
     }
     let s = save.clone();
     panel.connect_active_notify(move |_| s());
+    let s = save.clone();
+    remember.connect_active_notify(move |_| s());
     body.append(&row("Terminal", &terminal));
     body.append(&row("Start orb runs", &launcher));
     body.append(&row("Task bar", &panel));
+    body.append(&row("Open windows where they were", &remember));
     let note = Label::new(Some("The task bar starts and stops with the next session."));
     note.add_css_class("hint");
     note.set_halign(Align::Start);

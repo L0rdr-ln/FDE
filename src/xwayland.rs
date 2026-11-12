@@ -92,6 +92,7 @@ impl Fde {
             if let Some(ws) = w.wl_surface().map(|s| s.into_owned()) {
                 self.start_ghost(&ws);
             }
+            self.remember_placement(&w);
             self.space.unmap_elem(&w);
             self.minimized.retain(|m| m != &w);
             self.parked.retain(|m| m != &w);
@@ -115,8 +116,10 @@ impl XwmHandler for Fde {
         let window = Window::new_x11_window(surface.clone());
         self.map_new_window(window.clone());
         let size = surface.geometry().size;
-        if let Some(loc) = self.space.element_location(&window) {
-            let _ = surface.configure(Some(Rectangle::new(loc, (size.w.max(64), size.h.max(48)).into())));
+        if !self.restore_placement(&window) {
+            if let Some(loc) = self.space.element_location(&window) {
+                let _ = surface.configure(Some(Rectangle::new(loc, (size.w.max(64), size.h.max(48)).into())));
+            }
         }
         self.sync_foreign_toplevels();
     }
