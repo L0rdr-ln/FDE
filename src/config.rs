@@ -57,6 +57,22 @@ impl Default for Wallpaper {
 
 pub const WALLPAPER_MODES: [&str; 5] = ["fill", "fit", "stretch", "center", "tile"];
 
+/// Which programs may capture the screen, see and control other windows, and lock the screen.
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Security {
+    /// false: every program may (not recommended)
+    pub restrict: bool,
+    /// programs (file names) installed in a system folder that may, besides FDE's own
+    pub trusted_programs: Vec<String>,
+}
+
+impl Default for Security {
+    fn default() -> Self {
+        Security { restrict: true, trusted_programs: crate::security::DEFAULT_TRUSTED.iter().map(|s| s.to_string()).collect() }
+    }
+}
+
 /// Night light: the screen turns warmer in the evening.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
@@ -194,6 +210,7 @@ pub struct Config {
     pub shell: Shell,
     pub session: Session,
     pub display: Display,
+    pub security: Security,
     /// which of accent, transparency, blur, gloss the user's files set (they win over the theme)
     #[serde(skip)]
     pub explicit: Vec<String>,

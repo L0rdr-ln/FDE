@@ -10,6 +10,38 @@ use crate::state::Fde;
 pub const IDLE_REDRAW: Duration = Duration::from_millis(500);
 
 impl Fde {
+    /// Tell the locking program the screen is locked, once every monitor shows its lock surface
+    /// (called after a locked frame was drawn).
+    pub fn confirm_lock(&mut self) {
+        if self.lock_confirmation.is_some() && self.all_outputs().iter().all(|o| self.lock_surfaces.iter().any(|(lo, _)| lo == o)) {
+            if let Some(confirmation) = self.lock_confirmation.take() {
+                confirmation.lock();
+            }
+        }
+    }
+
+    /// An unlock was asked for: it counts only if the lock object of the program that locked is
+    /// gone now (its unlock destroys it). Any other request (a program that never held the lock)
+    /// leaves the screen locked.
+    pub fn finish_unlock(&mut self) {
+        if !self.unlock_pending {
+            return;
+        }
+        self.unlock_pending = false;
+        use smithay::reexports::wayland_server::Resource;
+        if self.lock_owner.as_ref().map(|o| o.is_alive()).unwrap_or(false) {
+            tracing::warn!("an unlock from a program that did not lock the session: refused");
+            return;
+        }
+        self.lock_owner = None;
+        self.locked = false;
+        self.lock_surfaces.clear();
+        self.lock_confirmation = None;
+        self.focus_top_window();
+        self.request_redraw();
+        tracing::info!("session unlocked");
+    }
+
     /// Fast mode: one blur pass, no drop shadows, no wobble. Chosen with `appearance.performance`.
     pub fn fast_mode(&self) -> bool {
         match self.config.appearance.performance.as_str() {

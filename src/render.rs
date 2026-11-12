@@ -225,12 +225,7 @@ impl Fde {
             draw_render_elements(&mut frame, view.scale, &elements, &[full])?;
             let _ = frame.finish()?;
         }
-        // confirmed when every monitor has a lock surface (or none was ever going to come)
-        if self.lock_confirmation.is_some() && self.all_outputs().iter().all(|o| self.lock_surfaces.iter().any(|(lo, _)| lo == o)) {
-            if let Some(confirmation) = self.lock_confirmation.take() {
-                confirmation.lock();
-            }
-        }
+        self.confirm_lock();
         Ok(())
     }
 

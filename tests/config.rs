@@ -349,3 +349,13 @@ fn the_performance_setting_is_checked() {
     assert!(Config::parse("[appearance]\nperformance = \"fast\"\n").is_ok());
     assert!(Config::parse("[appearance]\nperformance = \"turbo\"\n").is_err());
 }
+
+#[test]
+fn the_security_settings_have_safe_defaults() {
+    use fde::config::Config;
+    let c = Config::parse("").unwrap();
+    assert!(c.security.restrict, "restricted by default");
+    assert!(c.security.trusted_programs.iter().any(|p| p == "xdg-desktop-portal-wlr"), "screen sharing in browsers keeps working");
+    let c = Config::parse("[security]\ntrusted_programs = []\n").unwrap();
+    assert!(c.security.trusted_programs.is_empty());
+}

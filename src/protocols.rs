@@ -18,8 +18,22 @@ impl XdgActivationHandler for Fde {
         &mut self.xdg_activation_state
     }
 
-    fn request_activation(&mut self, _token: XdgActivationToken, _data: XdgActivationTokenData, surface: WlSurface) {
-        if self.locked {
+    /// A token is only good if the program that has the keyboard asked for it, with the serial of
+    /// something the user just did there: no program can pull itself to the front (and take the
+    /// keyboard, with what is being typed) whenever it likes.
+    fn token_created(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData) -> bool {
+        let Some((serial, seat)) = data.serial else { return false };
+        let Some(seat) = smithay::input::Seat::<Fde>::from_resource(&seat) else { return false };
+        let Some(kb) = seat.get_keyboard() else { return false };
+        use smithay::reexports::wayland_server::Resource;
+        let focused_client = kb.current_focus().and_then(|s| s.client()).map(|c| c.id());
+        let fresh = kb.last_enter().map(|enter| serial.is_no_older_than(&enter)).unwrap_or(false);
+        fresh && focused_client.is_some() && data.client_id == focused_client
+    }
+
+    fn request_activation(&mut self, _token: XdgActivationToken, data: XdgActivationTokenData, surface: WlSurface) {
+        // and only for a short while after it was made
+        if self.locked || data.timestamp.elapsed() > std::time::Duration::from_secs(10) {
             return;
         }
         if let Some(w) = self.window_for_surface(&surface) {

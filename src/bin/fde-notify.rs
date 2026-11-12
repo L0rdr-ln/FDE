@@ -158,11 +158,7 @@ struct Popup {
 }
 
 fn tempfile_in_runtime_dir() -> std::io::Result<std::fs::File> {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    let path = format!("{dir}/fde-notify-{}", std::process::id());
-    let f = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&path)?;
-    let _ = std::fs::remove_file(&path);
-    Ok(f)
+    fde::shm::anonymous_file("fde-notify")
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

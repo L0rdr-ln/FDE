@@ -118,10 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         queue.blocking_dispatch(&mut app)?;
     }
     let (w, h, stride, _) = app.buffer.ok_or("the compositor offered no usable buffer")?;
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    let tmp = format!("{dir}/fde-shot-{}", std::process::id());
-    let mut shm_file = std::fs::OpenOptions::new().read(true).write(true).create(true).truncate(true).open(&tmp)?;
-    let _ = std::fs::remove_file(&tmp);
+    let mut shm_file = fde::shm::anonymous_file("fde-shot")?;
     shm_file.set_len((stride * h) as u64)?;
     let pool = shm.create_pool(shm_file.as_fd(), (stride * h) as i32, &qh, ());
     let buffer = pool.create_buffer(0, w as i32, h as i32, stride as i32, wl_shm::Format::Xrgb8888, &qh, ());

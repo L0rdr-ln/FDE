@@ -205,8 +205,12 @@ impl XwmHandler for Fde {
     }
 
     // clipboard and primary selection between X11 and Wayland programs
+    /// X11 programs read the clipboard only while one of them has the keyboard (as a Wayland program
+    /// only gets it while focused), so a program in the background cannot watch what is copied.
     fn allow_selection_access(&mut self, _: XwmId, _: SelectionTarget) -> bool {
-        true
+        let focus = self.seat.get_keyboard().and_then(|k| k.current_focus());
+        let Some(surface) = focus else { return false };
+        self.space.elements().any(|w| w.x11_surface().is_some() && w.wl_surface().map(|s| *s == surface).unwrap_or(false))
     }
 
     /// An X program wants what a Wayland program has copied.

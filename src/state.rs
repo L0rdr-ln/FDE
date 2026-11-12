@@ -100,6 +100,10 @@ pub struct Fde {
     /// the session is locked: only `lock_surface` is shown and gets input
     pub locked: bool,
     pub lock_surfaces: Vec<(Output, smithay::wayland::session_lock::LockSurface)>,
+    /// the lock object of the program that locked the screen; only its own unlock counts
+    pub lock_owner: Option<smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1>,
+    /// an unlock was asked for: checked once the request is through (see `finish_unlock`)
+    pub unlock_pending: bool,
     pub lock_confirmation: Option<smithay::wayland::session_lock::SessionLocker>,
     pub foreign_toplevels: crate::foreign_toplevel::ForeignToplevelState,
     pub background_effect_state: crate::background_effect::BackgroundEffectState,
@@ -202,6 +206,15 @@ pub struct TitleTex {
 #[derive(Default)]
 pub struct ClientState {
     pub compositor_state: CompositorClientState,
+    /// may use screen capture, the window list and the session lock (see `security`)
+    pub privileged: bool,
+}
+
+impl ClientState {
+    /// A client that may use everything (FDE's own programs started on a private connection, tests).
+    pub fn trusted() -> ClientState {
+        ClientState { privileged: true, ..Default::default() }
+    }
 }
 
 impl ClientData for ClientState {
@@ -228,7 +241,7 @@ impl Fde {
         let xdg_shell_state = XdgShellState::new::<Fde>(dh);
         let xdg_decoration_state = XdgDecorationState::new::<Fde>(dh);
         let layer_shell_state = WlrLayerShellState::new::<Fde>(dh);
-        let session_lock_state = smithay::wayland::session_lock::SessionLockManagerState::new::<Fde, _>(dh, |_| true);
+        let session_lock_state = smithay::wayland::session_lock::SessionLockManagerState::new::<Fde, _>(dh, crate::security::privileged);
         let foreign_toplevels = crate::foreign_toplevel::ForeignToplevelState::new::<Fde>(dh);
         let background_effect_state = crate::background_effect::BackgroundEffectState::new::<Fde>(dh);
         let shm_state = ShmState::new::<Fde>(dh, vec![]);
@@ -302,6 +315,8 @@ impl Fde {
             session_lock_state,
             locked: false,
             lock_surfaces: Vec::new(),
+            lock_owner: None,
+            unlock_pending: false,
             lock_confirmation: None,
             foreign_toplevels,
             background_effect_state,

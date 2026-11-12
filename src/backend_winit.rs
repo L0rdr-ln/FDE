@@ -42,9 +42,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Generic::new(socket, Interest::READ, Mode::Level),
         |_, socket, state| {
             while let Some(stream) = socket.accept()? {
-                let _ = state
-                    .display_handle
-                    .insert_client(stream, Arc::new(ClientState::default()));
+                // which program is it, and may it see the protocols that watch other programs?
+                let client = crate::security::client_state_for(&stream, &state.config);
+                let _ = state.display_handle.insert_client(stream, Arc::new(client));
             }
             Ok(PostAction::Continue)
         },
@@ -55,6 +55,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Generic::new(poll_fd, Interest::READ, Mode::Level),
         move |_, _, state| {
             display.dispatch_clients(state).expect("dispatch");
+            state.finish_unlock();
             display.flush_clients().expect("flush");
             Ok(PostAction::Continue)
         },

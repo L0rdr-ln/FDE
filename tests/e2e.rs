@@ -133,6 +133,8 @@ struct Harness {
     display: Display<Fde>,
     state: Fde,
     socket: ListeningSocket,
+    /// connect clients as ordinary programs (not trusted with screen capture and the like)
+    ordinary_clients: bool,
 }
 
 impl Harness {
@@ -140,10 +142,11 @@ impl Harness {
         while let Some(stream) = self.socket.accept().unwrap() {
             self.display
                 .handle()
-                .insert_client(stream, Arc::new(ClientState::default()))
+                .insert_client(stream, Arc::new(if self.ordinary_clients { ClientState::default() } else { ClientState::trusted() }))
                 .unwrap();
         }
         self.display.dispatch_clients(&mut self.state).unwrap();
+        self.state.finish_unlock();
         self.display.flush_clients().unwrap();
     }
 
@@ -179,7 +182,7 @@ fn a_client_window_gets_a_glass_frame_and_can_be_closed_with_its_orb() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
 
@@ -377,7 +380,7 @@ fn a_panel_reserves_space_and_maximized_windows_stay_above_it() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-layer").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
 
@@ -461,7 +464,7 @@ fn the_real_task_bar_shows_a_button_for_an_open_window() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-tasks").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
 
@@ -526,7 +529,7 @@ fn the_lock_screen_locks_the_session_and_unlocks_with_the_right_password() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-lock").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
 
@@ -662,7 +665,7 @@ fn a_notification_sent_over_dbus_appears_as_a_bubble_and_goes_away() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-notify").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     let grab = |renderer: &mut smithay::backend::renderer::gles::GlesRenderer, scene: &mut GlesTexture| -> Vec<u8> {
@@ -784,7 +787,7 @@ fn typing_in_the_start_menu_filters_and_enter_starts_the_program() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-menu").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
 
@@ -847,7 +850,7 @@ fn a_new_window_fades_and_grows_in() {
     let state = Fde::new(&display.handle(), (w, h).into());
     assert!(state.config.appearance.animations, "on by default");
     let socket = ListeningSocket::bind("fde-e2e-anim").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
 
@@ -929,7 +932,7 @@ fn a_window_on_the_second_monitor_is_drawn_there_and_the_pointer_and_maximize_fo
     state.config.appearance.animations = false;
     let second = state.add_output("fde-1", (800, 600), 60_000);
     let socket = ListeningSocket::bind("fde-e2e-two").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene0: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     let mut scene1: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
@@ -988,7 +991,7 @@ fn a_hidpi_monitor_draws_everything_at_double_size() {
     state.output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(2.0)), None);
     assert_eq!(state.output_size(), (800, 600).into());
     let socket = ListeningSocket::bind("fde-e2e-hidpi").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (1600, 1200).into()).unwrap();
 
@@ -1032,7 +1035,7 @@ fn the_task_bar_draws_at_the_monitors_scale() {
     state.config.appearance.animations = false;
     state.output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(2.0)), None);
     let socket = ListeningSocket::bind("fde-e2e-pscale").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (1600, 1200).into()).unwrap();
 
@@ -1076,7 +1079,7 @@ fn every_monitor_gets_its_own_task_bar_and_unplugging_one_closes_its_bar() {
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     let second = state.add_output("fde-1", (640, 480), 60_000);
     let socket = ListeningSocket::bind("fde-e2e-bars").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
 
     let spawn = |name: &str| {
         std::process::Command::new(env!("CARGO_BIN_EXE_fde-panel"))
@@ -1180,7 +1183,7 @@ fn the_cursor_comes_from_the_theme_and_turns_into_resize_arrows_on_a_border() {
     state.config.appearance.animations = false;
     state.draw_cursor = true;
     let socket = ListeningSocket::bind("fde-e2e-cursor").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
 
@@ -1227,7 +1230,7 @@ fn minimizing_shrinks_into_the_task_bar_button_and_restoring_brings_it_back() {
     let display: Display<Fde> = Display::new().unwrap();
     let state = Fde::new(&display.handle(), (w, h).into());
     let socket = ListeningSocket::bind("fde-e2e-min").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
 
@@ -1311,7 +1314,7 @@ fn a_wallpaper_picture_from_the_configuration_is_what_the_monitor_shows() {
     let state = Fde::new(&display.handle(), (800, 600).into());
     std::env::remove_var("FDE_CONFIG");
     let socket = ListeningSocket::bind("fde-e2e-wall").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (800, 600).into()).unwrap();
     hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
@@ -1340,7 +1343,7 @@ fn a_fullscreen_window_fills_the_monitor_without_a_frame_and_hides_the_panels() 
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-full").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     open_window(&mut hn, dir.path(), "fde-e2e-full", 200, 100);
@@ -1471,7 +1474,7 @@ fn a_program_can_lock_the_pointer_and_read_relative_motion() {
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-grab").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let (tx, rx) = mpsc::channel();
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (path, s2) = (dir.path().join("fde-e2e-grab"), stop.clone());
@@ -1515,7 +1518,7 @@ fn xdg_activation_brings_a_window_to_the_front_and_restores_a_minimized_one() {
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-act").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     open_window(&mut hn, dir.path(), "fde-e2e-act", 200, 100);
     open_window(&mut hn, dir.path(), "fde-e2e-act", 200, 100);
     let wins: Vec<_> = hn.state.space.elements().cloned().collect();
@@ -1554,7 +1557,7 @@ fn the_dmabuf_global_is_offered_once_the_renderer_is_known() {
     let _ = &mut renderer;
     assert!(state.dmabuf_global.is_some());
     let socket = ListeningSocket::bind("fde-e2e-dma").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let path = dir.path().join("fde-e2e-dma");
     let th = std::thread::spawn(move || {
         let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
@@ -1580,7 +1583,7 @@ fn a_window_that_asks_for_idle_inhibit_keeps_the_screen_awake_while_it_shows() {
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-idle").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     open_window(&mut hn, dir.path(), "fde-e2e-idle", 200, 100);
     let win = hn.state.space.elements().next().cloned().unwrap();
     let surface = win.toplevel().unwrap().wl_surface().clone();
@@ -1615,7 +1618,7 @@ fn a_dragged_window_bends_on_its_springs_and_settles_flat() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-wob").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     open_window(&mut hn, dir.path(), "fde-e2e-wob", 260, 160);
@@ -1688,7 +1691,7 @@ fn a_program_learns_the_exact_scale_and_may_use_a_viewport() {
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     state.output.change_current_state(None, None, Some(smithay::output::Scale::Fractional(1.5)), None);
     let socket = ListeningSocket::bind("fde-e2e-frac").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let path = dir.path().join("fde-e2e-frac");
     let th = std::thread::spawn(move || {
         let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
@@ -1771,7 +1774,7 @@ fn a_program_can_take_a_screenshot_of_a_monitor_region() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-copy").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     let path = dir.path().join("fde-e2e-copy");
@@ -1927,7 +1930,7 @@ fn every_theme_changes_how_a_window_is_drawn() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-theme").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     open_window(&mut hn, dir.path(), "fde-e2e-theme", 240, 120);
@@ -2047,7 +2050,7 @@ fn selected_text_is_offered_for_middle_click_paste() {
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-prim").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let path = dir.path().join("fde-e2e-prim");
     let th = std::thread::spawn(move || {
         let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
@@ -2260,7 +2263,7 @@ fn text_copied_in_one_window_can_be_pasted_in_another() {
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-clip").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let path = dir.path().join("fde-e2e-clip");
     let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let (tx1, _rx1) = mpsc::channel();
@@ -2305,7 +2308,7 @@ fn the_clipboard_is_shared_between_x11_and_wayland_programs() {
     let socket = ListeningSocket::bind("fde-e2e-xclip").unwrap();
     let mut step = |state: &mut Fde, display: &mut Display<Fde>, ev: &mut smithay::reexports::calloop::EventLoop<'static, Fde>, socket: &ListeningSocket| {
         while let Some(stream) = socket.accept().unwrap() {
-            display.handle().insert_client(stream, Arc::new(ClientState::default())).unwrap();
+            display.handle().insert_client(stream, Arc::new(ClientState::trusted())).unwrap();
         }
         ev.dispatch(Duration::from_millis(3), state).unwrap();
         display.dispatch_clients(state).unwrap();
@@ -2368,6 +2371,28 @@ fn the_clipboard_is_shared_between_x11_and_wayland_programs() {
         step(&mut state, &mut display, &mut ev, &socket);
         std::thread::sleep(Duration::from_millis(3));
     }
+    // X11 programs read the clipboard only while an X11 window has the keyboard: open one
+    let wayland_owner = state.space.elements().last().cloned().unwrap();
+    let mut xterm = std::process::Command::new("xterm")
+        .args(["-e", "sleep", "30"])
+        .env("DISPLAY", &xdisplay)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let t0 = Instant::now();
+    loop {
+        step(&mut state, &mut display, &mut ev, &socket);
+        let focus = state.seat.get_keyboard().and_then(|k| k.current_focus());
+        let x11_focused = state.space.elements().any(|w| {
+            use smithay::wayland::seat::WaylandFocus;
+            w.x11_surface().is_some() && w.wl_surface().map(|s| Some(&*s) == focus.as_ref()).unwrap_or(false)
+        });
+        if x11_focused {
+            break;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(20), "the xterm never got the keyboard");
+    }
     // ask until the copy has arrived (the window needs a moment to copy)
     let t0 = Instant::now();
     let out = 'ask: loop {
@@ -2397,6 +2422,33 @@ fn the_clipboard_is_shared_between_x11_and_wayland_programs() {
         }
     };
     assert_eq!(out, "hello from Wayland", "an X11 program pastes what a Wayland program copied");
+
+    // with a Wayland window in front again, an X11 program in the background cannot read it
+    state.focus_window(&wayland_owner);
+    let mut paste = std::process::Command::new("xclip")
+        .args(["-selection", "clipboard", "-o", "-t", "UTF8_STRING"])
+        .env("DISPLAY", &xdisplay)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .unwrap();
+    let t0 = Instant::now();
+    let snooped = loop {
+        step(&mut state, &mut display, &mut ev, &socket);
+        if let Some(status) = paste.try_wait().unwrap() {
+            use std::io::Read;
+            let mut text = String::new();
+            paste.stdout.take().unwrap().read_to_string(&mut text).unwrap();
+            break status.success() && text == "hello from Wayland";
+        }
+        if t0.elapsed() > Duration::from_secs(10) {
+            let _ = paste.kill();
+            break false;
+        }
+    };
+    assert!(!snooped, "a background X11 program must not read the clipboard");
+    let _ = xterm.kill();
+    let _ = xterm.wait();
     stop2.store(true, std::sync::atomic::Ordering::SeqCst);
     let _ = owner.join();
 }
@@ -2422,7 +2474,7 @@ fn the_start_menu_power_row_asks_twice_before_shutting_down() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-power").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     let mut panel = std::process::Command::new(env!("CARGO_BIN_EXE_fde-panel"))
@@ -2502,7 +2554,7 @@ fn fde_shot_saves_a_png_of_the_monitor() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-shot").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     let file = dir.path().join("shot.png");
@@ -2552,7 +2604,7 @@ fn windows_snap_to_half_the_screen_by_keys_and_by_dragging_to_the_edge() {
     state.config.appearance.animations = false;
     state.config.appearance.wobbly_windows = false;
     let socket = ListeningSocket::bind("fde-e2e-snap").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     open_window(&mut hn, dir.path(), "fde-e2e-snap", 200, 100);
     let win = hn.state.space.elements().next().cloned().unwrap();
     let before = hn.state.space.element_geometry(&win).unwrap().loc;
@@ -2612,7 +2664,7 @@ fn windows_live_on_workspaces_and_only_the_shown_ones_are_on_the_screen() {
     let mut state = Fde::new(&display.handle(), (800, 600).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-ws").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     assert_eq!(hn.state.workspace_count(), 4);
 
     open_window(&mut hn, dir.path(), "fde-e2e-ws", 200, 100);
@@ -2672,7 +2724,7 @@ fn a_closed_window_fades_out_instead_of_vanishing() {
     state.config.appearance.wobbly_windows = false;
     state.config.appearance.animations = true;
     let socket = ListeningSocket::bind("fde-e2e-fade").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     open_window(&mut hn, dir.path(), "fde-e2e-fade", 260, 160);
@@ -2725,7 +2777,7 @@ fn the_switcher_walks_through_windows_most_recent_first_and_picks_on_commit() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-switch").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     for _ in 0..3 {
@@ -2866,7 +2918,7 @@ fn fast_mode_skips_the_drop_shadow_and_auto_turns_on_for_software_graphics() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-fast").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     open_window(&mut hn, dir.path(), "fde-e2e-fast", 240, 140);
@@ -2908,7 +2960,7 @@ fn frame_time_bench() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.animations = false;
     let socket = ListeningSocket::bind("fde-e2e-bench").unwrap();
-    let mut hn = Harness { display, state, socket };
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
     let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
     let mut time = |hn: &mut Harness, label: &str, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, scene: &mut GlesTexture| {
@@ -3068,4 +3120,176 @@ fn the_real_compositor_keeps_a_window_drawing_at_a_steady_rate() {
     stop(&mut fde);
     eprintln!("the real compositor showed {frames} frames in {seconds} s");
     assert!(frames >= 10 * seconds as u32, "a window that draws all the time must get many frames a second, got {frames} in {seconds} s");
+}
+
+// ------------------------------------------------------------------ security
+
+use wayland_protocols::ext::session_lock::v1::client::{ext_session_lock_manager_v1, ext_session_lock_surface_v1, ext_session_lock_v1};
+
+#[derive(Default)]
+struct LockApp {
+    locked: bool,
+    finished: bool,
+    configured: Option<(u32, u32, u32)>,
+}
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for LockApp {
+    fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+}
+delegate_noop!(LockApp: ignore wl_compositor::WlCompositor);
+delegate_noop!(LockApp: ignore wl_surface::WlSurface);
+delegate_noop!(LockApp: ignore wl_shm::WlShm);
+delegate_noop!(LockApp: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(LockApp: ignore wl_buffer::WlBuffer);
+delegate_noop!(LockApp: ignore wayland_client::protocol::wl_output::WlOutput);
+delegate_noop!(LockApp: ignore ext_session_lock_manager_v1::ExtSessionLockManagerV1);
+impl Dispatch<ext_session_lock_v1::ExtSessionLockV1, ()> for LockApp {
+    fn event(app: &mut Self, _: &ext_session_lock_v1::ExtSessionLockV1, event: ext_session_lock_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            ext_session_lock_v1::Event::Locked => app.locked = true,
+            ext_session_lock_v1::Event::Finished => app.finished = true,
+            _ => {}
+        }
+    }
+}
+impl Dispatch<ext_session_lock_surface_v1::ExtSessionLockSurfaceV1, ()> for LockApp {
+    fn event(app: &mut Self, s: &ext_session_lock_surface_v1::ExtSessionLockSurfaceV1, event: ext_session_lock_surface_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let ext_session_lock_surface_v1::Event::Configure { serial, width, height } = event {
+            s.ack_configure(serial);
+            app.configured = Some((serial, width, height));
+        }
+    }
+}
+
+fn globals_seen(hn: &mut Harness, path: std::path::PathBuf) -> Vec<String> {
+    let th = std::thread::spawn(move || {
+        let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
+        let (globals, _q) = registry_queue_init::<App>(&conn).unwrap();
+        globals.contents().with_list(|l| l.iter().map(|g| g.interface.clone()).collect::<Vec<_>>())
+    });
+    let t0 = Instant::now();
+    while !th.is_finished() {
+        hn.pump();
+        assert!(t0.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    th.join().unwrap()
+}
+
+#[test]
+fn ordinary_programs_cannot_see_screen_capture_the_window_list_or_the_session_lock() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let state = Fde::new(&display.handle(), (800, 600).into());
+    let socket = ListeningSocket::bind("fde-e2e-sec").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: true };
+    let path = dir.path().join("fde-e2e-sec");
+    let privileged = ["zwlr_screencopy_manager_v1", "zwlr_foreign_toplevel_manager_v1", "ext_session_lock_manager_v1"];
+    let seen = globals_seen(&mut hn, path.clone());
+    for g in privileged {
+        assert!(!seen.iter().any(|s| s == g), "an ordinary program must not see {g}");
+    }
+    assert!(seen.iter().any(|s| s == "xdg_wm_base"), "it still sees what windows need");
+    hn.ordinary_clients = false;
+    let seen = globals_seen(&mut hn, path);
+    for g in privileged {
+        assert!(seen.iter().any(|s| s == g), "a trusted program sees {g}");
+    }
+}
+
+#[test]
+fn a_second_program_can_neither_take_over_the_lock_nor_unlock_the_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let state = Fde::new(&display.handle(), (800, 600).into());
+    let socket = ListeningSocket::bind("fde-e2e-lock2").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let path = dir.path().join("fde-e2e-lock2");
+
+    // the real lock program: locks, shows a surface, and is told the screen is locked
+    let (owner_tx, owner_rx) = mpsc::channel::<&'static str>();
+    let (owner_done_tx, owner_done_rx) = mpsc::channel::<bool>();
+    let p1 = path.clone();
+    let owner = std::thread::spawn(move || {
+        let conn = Connection::from_socket(UnixStream::connect(p1).unwrap()).unwrap();
+        let (globals, mut queue) = registry_queue_init::<LockApp>(&conn).unwrap();
+        let qh = queue.handle();
+        let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=4, ()).unwrap();
+        let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+        let output: wayland_client::protocol::wl_output::WlOutput = globals.bind(&qh, 1..=4, ()).unwrap();
+        let mgr: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = globals.bind(&qh, 1..=1, ()).unwrap();
+        let mut app = LockApp::default();
+        let lock = mgr.lock(&qh, ());
+        let surface = compositor.create_surface(&qh, ());
+        let _ls = lock.get_lock_surface(&surface, &output, &qh, ());
+        while app.configured.is_none() {
+            queue.blocking_dispatch(&mut app).unwrap();
+        }
+        let (_, w, h) = app.configured.unwrap();
+        let (w, h) = (w as i32, h as i32);
+        let mut file = tempfile::tempfile_in(std::env::var("XDG_RUNTIME_DIR").unwrap()).unwrap();
+        file.write_all(&vec![0u8; (w * h * 4) as usize]).unwrap();
+        use std::os::fd::AsFd;
+        let pool = shm.create_pool(file.as_fd(), w * h * 4, &qh, ());
+        let buf = pool.create_buffer(0, w, h, w * 4, wl_shm::Format::Argb8888, &qh, ());
+        surface.attach(Some(&buf), 0, 0);
+        surface.commit();
+        queue.roundtrip(&mut app).unwrap();
+        owner_tx.send("surface").unwrap();
+        // wait to be told to unlock
+        while owner_done_rx.try_recv().is_err() {
+            queue.roundtrip(&mut app).unwrap();
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(app.locked, "the real lock program was told the screen is locked");
+        lock.unlock_and_destroy();
+        queue.roundtrip(&mut app).unwrap();
+    });
+    let t0 = Instant::now();
+    while owner_rx.try_recv().is_err() {
+        hn.pump();
+        assert!(t0.elapsed() < Duration::from_secs(10), "the lock surface never came");
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    hn.state.confirm_lock(); // what drawing a locked frame does
+    hn.pump_for(100);
+    assert!(hn.state.locked);
+
+    // a second program asks to lock: refused; then asks to unlock: the screen stays locked
+    let p2 = path.clone();
+    let intruder = std::thread::spawn(move || {
+        let conn = Connection::from_socket(UnixStream::connect(p2).unwrap()).unwrap();
+        let (globals, mut queue) = registry_queue_init::<LockApp>(&conn).unwrap();
+        let qh = queue.handle();
+        let mgr: ext_session_lock_manager_v1::ExtSessionLockManagerV1 = globals.bind(&qh, 1..=1, ()).unwrap();
+        let mut app = LockApp::default();
+        let lock = mgr.lock(&qh, ());
+        let _ = queue.roundtrip(&mut app);
+        let refused = app.finished && !app.locked;
+        lock.unlock_and_destroy();
+        let _ = queue.roundtrip(&mut app); // the compositor answers with a protocol error
+        refused
+    });
+    let t0 = Instant::now();
+    while !intruder.is_finished() {
+        hn.pump();
+        assert!(t0.elapsed() < Duration::from_secs(10));
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    assert!(intruder.join().unwrap(), "the second lock is refused");
+    hn.pump_for(100);
+    assert!(hn.state.locked, "an unlock from a program that did not lock leaves the screen locked");
+
+    // the program that locked can unlock
+    owner_done_tx.send(true).unwrap();
+    let t0 = Instant::now();
+    while hn.state.locked {
+        hn.pump();
+        assert!(t0.elapsed() < Duration::from_secs(10), "the owner's unlock did not work");
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    owner.join().unwrap();
 }

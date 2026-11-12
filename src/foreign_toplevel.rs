@@ -58,6 +58,10 @@ impl ForeignToplevelState {
 }
 
 impl GlobalDispatch<ZwlrForeignToplevelManagerV1, ()> for Fde {
+    fn can_view(client: Client, _: &()) -> bool {
+        crate::security::privileged(&client)
+    }
+
     fn bind(
         state: &mut Fde,
         _: &DisplayHandle,

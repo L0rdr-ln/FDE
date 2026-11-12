@@ -48,6 +48,10 @@ pub fn create_global(dh: &DisplayHandle) {
 }
 
 impl GlobalDispatch<ZwlrScreencopyManagerV1, ()> for Fde {
+    fn can_view(client: Client, _: &()) -> bool {
+        crate::security::privileged(&client)
+    }
+
     fn bind(_: &mut Fde, _: &DisplayHandle, _: &Client, resource: New<ZwlrScreencopyManagerV1>, _: &(), data_init: &mut DataInit<'_, Fde>) {
         data_init.init(resource, ());
     }

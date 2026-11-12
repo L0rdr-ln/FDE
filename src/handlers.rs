@@ -296,7 +296,15 @@ impl smithay::wayland::session_lock::SessionLockHandler for Fde {
     }
 
     fn lock(&mut self, confirmation: smithay::wayland::session_lock::SessionLocker) {
+        // a second lock while locked is refused (dropping the locker tells that program so);
+        // otherwise it would take the lock over and could then unlock it
+        if self.locked {
+            tracing::warn!("a second program tried to lock the session: refused");
+            return;
+        }
         // nothing but the lock screen from now on; confirmed once a frame without anything else is drawn
+        self.lock_owner = Some(confirmation.ext_session_lock().clone());
+        self.unlock_pending = false;
         self.locked = true;
         self.drag = None;
         self.lock_confirmation = Some(confirmation);
@@ -307,11 +315,9 @@ impl smithay::wayland::session_lock::SessionLockHandler for Fde {
     }
 
     fn unlock(&mut self) {
-        self.locked = false;
-        self.lock_surfaces.clear();
-        self.lock_confirmation = None;
-        self.focus_top_window();
-        tracing::info!("session unlocked");
+        // only the program that locked may unlock, by destroying its own lock object; any other
+        // lock object asking for this is refused once the request is through (`finish_unlock`)
+        self.unlock_pending = true;
     }
 
     fn new_surface(&mut self, surface: smithay::wayland::session_lock::LockSurface, wl_output: smithay::reexports::wayland_server::protocol::wl_output::WlOutput) {
