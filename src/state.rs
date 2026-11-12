@@ -130,6 +130,14 @@ pub struct Fde {
     pub help_open: bool,
     /// Alt was let go while the switcher was open: commit after the key event is handled
     pub switcher_commit: bool,
+    /// the Windows key is down and nothing else was pressed since: letting go opens the start menu
+    pub super_alone: bool,
+    /// the Windows key was tapped: open the start menu after the key event is handled
+    pub menu_requested: bool,
+    /// the task bars, by monitor name (kept, so a task bar that ended is noticed before it is signalled)
+    pub panels: Vec<(String, std::process::Child)>,
+    /// the last click on a title bar: a second one soon after on the same window maximizes it
+    pub last_title_click: Option<(Window, std::time::Instant, Point<f64, Logical>)>,
     /// the last picture of windows that were asked to close, by their surface
     pub snapshots: std::collections::HashMap<smithay::reexports::wayland_server::backend::ObjectId, Snapshot>,
     /// windows that are gone and fade out
@@ -336,6 +344,10 @@ impl Fde {
             redraw_serial: 1,
             help_open: false,
             switcher_commit: false,
+            super_alone: false,
+            menu_requested: false,
+            panels: Vec::new(),
+            last_title_click: None,
             snapshots: Default::default(),
             ghosts: Vec::new(),
             workspace: 0,

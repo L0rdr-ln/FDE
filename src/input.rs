@@ -17,6 +17,7 @@ use crate::layout::{Button, Hit};
 use crate::state::{Drag, Edges, Fde};
 
 const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
 
 #[derive(Debug, Clone, Copy)]
 enum Action {
@@ -52,6 +53,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+M", "bring back a minimized window"),
     ("Alt+1 .. 9", "go to a workspace (Shift: send the window there)"),
     ("Alt+Ctrl+Left / Right", "previous or next workspace"),
+    ("Windows key", "open the start menu"),
     ("Alt+L", "lock the screen"),
     ("Alt+N", "do not disturb on or off"),
     ("Print", "screenshot of this monitor"),
@@ -100,7 +102,16 @@ impl Fde {
                         }
                         // a locked session has no shortcuts besides the console switch
                         if state.locked {
+                            state.super_alone = false;
                             return FilterResult::Forward;
+                        }
+                        // the Windows key on its own (pressed and let go with nothing in between)
+                        // opens the start menu; the key itself still goes to the program
+                        let is_super = matches!(sym, keysyms::KEY_Super_L | keysyms::KEY_Super_R);
+                        if event.state() == KeyState::Pressed {
+                            state.super_alone = is_super;
+                        } else if is_super && std::mem::take(&mut state.super_alone) {
+                            state.menu_requested = true;
                         }
                         if event.state() == KeyState::Pressed && handle.modified_sym().raw() == keysyms::KEY_Print {
                             return FilterResult::Intercept(Action::Screenshot);
@@ -153,6 +164,9 @@ impl Fde {
                 }
                 if std::mem::take(&mut self.switcher_commit) {
                     self.switcher_commit();
+                }
+                if std::mem::take(&mut self.menu_requested) {
+                    self.toggle_start_menu();
                 }
             }
             InputEvent::PointerMotionAbsolute { event } => {
@@ -301,7 +315,23 @@ impl Fde {
         // an ongoing drag takes the pointer
         if let Some(drag) = self.drag.clone() {
             match drag {
-                Drag::Move { window, grab_offset } => {
+                Drag::Move { window, mut grab_offset } => {
+                    if self.is_maximized(&window) {
+                        let Some(g) = self.space.element_geometry(&window) else { return };
+                        let press = g.loc.to_f64() + grab_offset;
+                        if (pos.x - press.x).abs() < 8.0 && (pos.y - press.y).abs() < 8.0 {
+                            return;
+                        }
+                        // pulled off: back to its old size, held at the same place across its width
+                        let old_w = self.restore_rect(&window).map(|r| r.size.w).unwrap_or(g.size.w);
+                        // the width it was asked to be (it may not have drawn at that size yet)
+                        let max_w = window.toplevel().and_then(|t| t.with_pending_state(|s| s.size)).map(|s| s.w).unwrap_or(g.size.w);
+                        grab_offset.x = (grab_offset.x / max_w.max(1) as f64 * old_w as f64).round();
+                        self.set_maximized(&window, false);
+                        self.start_wobble(&window, pos);
+                        self.hover_cursor = "grabbing";
+                        self.drag = Some(Drag::Move { window: window.clone(), grab_offset });
+                    }
                     let client_loc = (
                         (pos.x - grab_offset.x).round() as i32,
                         (pos.y - grab_offset.y).round() as i32,
@@ -354,6 +384,7 @@ impl Fde {
 
     pub fn pointer_button(&mut self, button: u32, pressed: bool, time: u32) {
         self.request_redraw();
+        self.super_alone = false;
         let serial = SERIAL_COUNTER.next_serial();
         let pos = self.pointer_location;
 
@@ -378,6 +409,15 @@ impl Fde {
             if layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None {
                 self.focus_layer(&layer);
             }
+        } else if button == BTN_RIGHT && self.alt_held() {
+            // Alt + right button: resize from the nearest corner
+            if let Some((window, client, Hit::Client | Hit::Titlebar)) = self.window_under(pos) {
+                self.focus_window(&window);
+                let mid = client.to_f64().loc + client.to_f64().size.to_point().downscale(2.0);
+                let edges = Edges { left: pos.x < mid.x, right: pos.x >= mid.x, top: pos.y < mid.y, bottom: pos.y >= mid.y };
+                self.start_resize(&window, edges, client);
+                return;
+            }
         } else if button == BTN_LEFT {
             let under = self.window_under(pos);
             if let Some((window, client, hit)) = under {
@@ -389,7 +429,16 @@ impl Fde {
                         return;
                     }
                     Hit::Titlebar => {
-                        self.start_move(&window, client);
+                        // a double click (quick, on the same spot of the same window) maximizes or restores
+                        let again = self.last_title_click.take().is_some_and(|(w, t, at)| {
+                            w == window && t.elapsed() < std::time::Duration::from_millis(400) && (at.x - pos.x).abs() < 5.0 && (at.y - pos.y).abs() < 5.0
+                        });
+                        if again {
+                            self.toggle_maximized(&window);
+                        } else {
+                            self.last_title_click = Some((window.clone(), std::time::Instant::now(), pos));
+                            self.start_move(&window, client);
+                        }
                         return;
                     }
                     Hit::Button(b) => {
@@ -456,7 +505,10 @@ impl Fde {
 
     pub fn start_move(&mut self, window: &smithay::desktop::Window, client: Rectangle<i32, Logical>) {
         if self.is_maximized(window) {
-            self.set_maximized(window, false);
+            // it comes off the top only once the pointer really moves (a click may be the first
+            // of a double click)
+            let grab_offset = self.pointer_location - client.loc.to_f64();
+            self.drag = Some(Drag::Move { window: window.clone(), grab_offset });
             return;
         }
         let mut client = client;

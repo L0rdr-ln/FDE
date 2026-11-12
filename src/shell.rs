@@ -4,21 +4,26 @@ use std::process::Command;
 
 /// Start a task bar (`fde-panel`, installed next to the compositor) for the monitor called
 /// `output`. `FDE_NO_PANEL=1` or `shell.panel = false` skips it.
-pub fn start_panel(config: &crate::config::Config, output: &str) {
+pub fn start_panel(config: &crate::config::Config, output: &str) -> Option<std::process::Child> {
     if std::env::var_os("FDE_NO_PANEL").is_some() || !config.shell.panel {
-        return;
+        return None;
     }
     let panel = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(|d| d.join("fde-panel")))
         .filter(|p| p.exists());
     match panel {
-        Some(p) => {
-            if let Err(e) = Command::new(&p).env("FDE_PANEL_OUTPUT", output).spawn() {
+        Some(p) => match Command::new(&p).env("FDE_PANEL_OUTPUT", output).spawn() {
+            Ok(child) => Some(child),
+            Err(e) => {
                 tracing::warn!("cannot start {}: {e}", p.display());
+                None
             }
+        },
+        None => {
+            tracing::info!("no fde-panel next to the compositor: starting without a task bar");
+            None
         }
-        None => tracing::info!("no fde-panel next to the compositor: starting without a task bar"),
     }
 }
 

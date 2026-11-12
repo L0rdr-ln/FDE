@@ -100,7 +100,9 @@ impl Fde {
         self.space.map_output(&output, loc);
         self.extra_outputs.push(output.clone());
         if self.session_started {
-            crate::shell::start_panel(&self.config, name);
+            if let Some(child) = crate::shell::start_panel(&self.config, name) {
+                self.panels.push((name.to_string(), child));
+            }
         }
         tracing::info!("output {name}: {}x{} at scale {} placed at {},{}", mode_px.0, mode_px.1, oc.scale, loc.x, loc.y);
         self.write_outputs_state();
@@ -186,7 +188,9 @@ impl Fde {
     pub fn start_session(&mut self) {
         self.session_started = true;
         for o in self.all_outputs() {
-            crate::shell::start_panel(&self.config, &o.name());
+            if let Some(child) = crate::shell::start_panel(&self.config, &o.name()) {
+                self.panels.push((o.name(), child));
+            }
         }
         crate::shell::start_other_clients(&self.config);
         self.write_outputs_state();

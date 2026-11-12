@@ -3567,3 +3567,92 @@ fn ordinary_programs_cannot_cover_the_screen_with_an_overlay_or_take_the_keyboar
     assert_eq!(run(&mut hn, zwlr_layer_shell_v1::Layer::Overlay), "shown");
     assert!(keyboard_on_a_layer(&hn), "a trusted launcher gets the keyboard at once");
 }
+
+#[test]
+fn title_bar_double_click_maximizes_dragging_restores_and_alt_right_drag_resizes() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-clicks").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    open_window(&mut hn, dir.path(), "fde-e2e-clicks", 300, 200);
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    let title = |hn: &Harness| {
+        let o = hn.state.outer_of(&win).unwrap();
+        (o.loc.x as f64 + o.size.w as f64 * 0.4, o.loc.y as f64 + (hn.state.style.border + hn.state.style.titlebar * 0.5) as f64)
+    };
+    let click = |hn: &mut Harness, p: (f64, f64)| {
+        hn.state.pointer_moved(p.into(), 0);
+        hn.state.pointer_button(0x110, true, 0);
+        hn.state.pointer_button(0x110, false, 0);
+        hn.pump();
+    };
+
+    // two clicks in a row on the title bar: maximized; one more click leaves it maximized
+    let t = title(&hn);
+    click(&mut hn, t);
+    assert!(!hn.state.is_maximized(&win), "one click does not maximize");
+    let t = title(&hn);
+    click(&mut hn, t);
+    assert!(hn.state.is_maximized(&win), "a double click maximizes");
+    std::thread::sleep(Duration::from_millis(450));
+    let t = title(&hn);
+    click(&mut hn, t);
+    assert!(hn.state.is_maximized(&win), "a single click on a maximized window's title bar leaves it maximized");
+
+    // pressing and pulling it down: back to its old size, under the pointer
+    std::thread::sleep(Duration::from_millis(450));
+    let p = title(&hn);
+    hn.state.pointer_moved(p.into(), 0);
+    hn.state.pointer_button(0x110, true, 0);
+    hn.state.pointer_moved((p.0 + 3.0, p.1 + 3.0).into(), 0);
+    assert!(hn.state.is_maximized(&win), "a jiggle of a few pixels is still a click");
+    hn.state.pointer_moved((p.0 + 40.0, p.1 + 120.0).into(), 0);
+    assert!(!hn.state.is_maximized(&win), "pulled off the top: restored");
+    hn.state.pointer_button(0x110, false, 0);
+    hn.pump_for(50);
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    assert_eq!(g.size, (300, 200).into(), "its old size");
+    let o = hn.state.outer_of(&win).unwrap();
+    assert!(o.to_f64().contains((p.0 + 40.0, p.1 + 120.0)) && (o.loc.y as f64) < p.1 + 120.0 - 4.0 && g.loc.y as f64 > p.1 + 120.0, "and it hangs from the pointer by its title bar: {o:?}");
+
+    // Alt + right button near the bottom right corner: that corner follows the pointer
+    let kb = hn.state.seat.get_keyboard().unwrap();
+    let alt = smithay::input::keyboard::Keycode::new(64);
+    kb.input::<(), _>(&mut hn.state, alt, smithay::backend::input::KeyState::Pressed, smithay::utils::SERIAL_COUNTER.next_serial(), 0, |_, _, _| smithay::input::keyboard::FilterResult::Forward);
+    let start = (g.loc.x as f64 + g.size.w as f64 - 20.0, g.loc.y as f64 + g.size.h as f64 - 20.0);
+    hn.state.pointer_moved(start.into(), 0);
+    hn.state.pointer_button(0x111, true, 0);
+    hn.state.pointer_moved((start.0 + 50.0, start.1 + 30.0).into(), 0);
+    hn.state.pointer_button(0x111, false, 0);
+    kb.input::<(), _>(&mut hn.state, alt, smithay::backend::input::KeyState::Released, smithay::utils::SERIAL_COUNTER.next_serial(), 0, |_, _, _| smithay::input::keyboard::FilterResult::Forward);
+    let asked = win.toplevel().unwrap().with_pending_state(|s| s.size).unwrap();
+    assert_eq!((asked.w, asked.h), (350, 230), "asked to grow by the pointer's movement");
+    assert_eq!(hn.state.space.element_geometry(&win).unwrap().loc, g.loc, "the top left corner stays");
+}
+
+#[test]
+fn the_windows_key_signals_the_task_bar_of_the_monitor_to_open_its_start_menu() {
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    // a stand-in for the task bar: SIGUSR1 ends `sleep`, so its exit tells whether it was signalled
+    let stand_in = std::process::Command::new("sleep").arg("10").spawn().unwrap();
+    let name = state.output.name();
+    state.panels.push((name, stand_in));
+    state.toggle_start_menu();
+    let (_, mut child) = state.panels.pop().unwrap();
+    let status = child.wait().unwrap();
+    use std::os::unix::process::ExitStatusExt;
+    assert_eq!(status.signal(), Some(libc::SIGUSR1), "the task bar got SIGUSR1");
+
+    // a task bar that has ended is forgotten, not signalled
+    let gone = std::process::Command::new("true").spawn().unwrap();
+    let pid = gone.id();
+    std::thread::sleep(Duration::from_millis(100));
+    state.panels.push(("x".into(), gone));
+    state.toggle_start_menu();
+    assert!(state.panels.is_empty(), "the ended task bar {pid} was dropped");
+}

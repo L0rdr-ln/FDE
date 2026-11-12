@@ -410,7 +410,15 @@ fn open_menu(
     Menu { surface, layer, file: None }
 }
 
+/// The compositor sends SIGUSR1 when the Windows key is tapped: open or close the start menu.
+static TOGGLE_MENU: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+extern "C" fn on_toggle_signal(_: libc::c_int) {
+    TOGGLE_MENU.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    unsafe { libc::signal(libc::SIGUSR1, on_toggle_signal as libc::sighandler_t) };
     let conn = Connection::connect_to_env()?;
     let (globals, mut queue) = registry_queue_init::<App>(&conn)?;
     let qh = queue.handle();
@@ -555,6 +563,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if app.clicked_orb {
             app.clicked_orb = false;
+            app.toggle_menu = true;
+        }
+        if TOGGLE_MENU.swap(false, std::sync::atomic::Ordering::SeqCst) {
             app.toggle_menu = true;
         }
         // the start menu

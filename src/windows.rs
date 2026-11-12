@@ -321,6 +321,26 @@ impl Fde {
         }
     }
 
+    /// Where a maximized window goes back to.
+    pub fn restore_rect(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
+        info(window).lock().unwrap().restore
+    }
+
+    /// Open or close the start menu of the task bar on the monitor the pointer is on.
+    pub fn toggle_start_menu(&mut self) {
+        let here = self.output_at(self.pointer_location).map(|o| o.name());
+        // task bars that have ended are forgotten (and reaped), so their number is never reused
+        self.panels.retain_mut(|(_, child)| matches!(child.try_wait(), Ok(None)));
+        let panel = self
+            .panels
+            .iter()
+            .find(|(name, _)| Some(name) == here.as_ref())
+            .or(self.panels.first());
+        if let Some((_, child)) = panel {
+            unsafe { libc::kill(child.id() as libc::pid_t, libc::SIGUSR1) };
+        }
+    }
+
     pub fn is_maximized(&self, window: &Window) -> bool {
         info(window).lock().unwrap().restore.is_some()
     }
