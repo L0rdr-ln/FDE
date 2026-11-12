@@ -12,6 +12,8 @@ FDE keeps that away from ordinary programs.
 | a picture of the screen (`wlr-screencopy`) | **no**, it does not even see the protocol | yes |
 | the list of all windows, and closing / minimizing them (`wlr-foreign-toplevel`) | **no** | yes |
 | locking the screen (`ext-session-lock`) | **no** | yes |
+| panels, docks, wallpapers (layer-shell `background`, `bottom`, `top`) | yes; the keyboard only when clicked | yes, and may take the keyboard at once |
+| an overlay above everything, full-screen windows included (layer-shell `overlay`) | **no**, it is closed | yes |
 | pulling itself to the front (`xdg-activation`) | only with a token asked for right after the user did something in the program that has the keyboard, and used within 10 seconds | the same |
 
 **Trusted** means one of FDE's own programs (`fde-panel`, `fde-lock`, `fde-notify`, `fde-shot`,
@@ -19,7 +21,9 @@ FDE keeps that away from ordinary programs.
 `[security] trusted_programs` that is installed in a system folder (`/usr`, `/bin`, `/opt`,
 `/nix/store` ...), owned by root and writable by nobody else. The default list is `grim`,
 `wf-recorder`, `wl-screenrec`, `xdg-desktop-portal-wlr` (screen sharing in browsers), `swaylock`,
-`waylock`, `obs`, `waybar`, `nwg-panel`. The compositor asks the kernel which program is on the
+`waylock`, `obs`, `waybar`, `nwg-panel`, and the launchers and notification programs `fuzzel`,
+`wofi`, `rofi`, `tofi`, `bemenu`, `bemenu-run`, `nwg-drawer`, `wlogout`, `mako`, `dunst`,
+`swaync`. The compositor asks the kernel which program is on the
 other end of each connection (SO_PEERCRED), so a program cannot claim to be another one by name.
 
 ```toml
@@ -57,9 +61,10 @@ has the keyboard, and they never get screen capture of Wayland windows.
   configuration and start trusted programs with their own settings. That is true on every Linux
   desktop; sandboxes (Flatpak) are what separates programs. FDE does make sure sandboxed programs
   never count as trusted.
-- **Panels and overlays.** Any program may still place a panel or an overlay (layer-shell), because
-  task bars, launchers and notification programs from other projects need it. Such a program could
-  draw something that looks like a password prompt. Alt+Tab, Alt+L and console switching always work.
+- **Panels.** Any program may still place a panel above the windows (layer-shell `top`), because
+  task bars from other projects need it. It cannot cover full-screen windows or the lock screen, and
+  it gets no typing unless you click it, but it could still draw something that looks like a
+  password prompt. Alt+Tab, Alt+L and console switching always work.
 - **Full-screen windows** can cover everything, as on any desktop.
 
 ## Reporting a problem

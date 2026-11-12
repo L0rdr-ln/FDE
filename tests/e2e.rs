@@ -3460,3 +3460,110 @@ fn a_program_with_its_own_title_bar_gets_no_second_one_and_can_move_itself() {
     assert_eq!(hn.state.space.element_geometry(&win).unwrap().loc, moved.loc, "the window stays put");
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
 }
+
+// ------------------------------------------------------------------ overlays need trust
+
+#[derive(Default)]
+struct LayerApp {
+    configured: bool,
+    closed: bool,
+}
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for LayerApp {
+    fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+}
+delegate_noop!(LayerApp: ignore wl_compositor::WlCompositor);
+delegate_noop!(LayerApp: ignore wl_surface::WlSurface);
+delegate_noop!(LayerApp: ignore wl_shm::WlShm);
+delegate_noop!(LayerApp: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(LayerApp: ignore wl_buffer::WlBuffer);
+delegate_noop!(LayerApp: ignore zwlr_layer_shell_v1::ZwlrLayerShellV1);
+impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, ()> for LayerApp {
+    fn event(app: &mut Self, s: &zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, event: zwlr_layer_surface_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        match event {
+            zwlr_layer_surface_v1::Event::Configure { serial, .. } => {
+                s.ack_configure(serial);
+                app.configured = true;
+            }
+            zwlr_layer_surface_v1::Event::Closed => app.closed = true,
+            _ => {}
+        }
+    }
+}
+
+/// A full-screen layer surface on `layer` that wants the keyboard to itself (a fake password
+/// prompt would). Reports "shown" or "closed".
+fn layer_client(path: std::path::PathBuf, layer: zwlr_layer_shell_v1::Layer, tx: mpsc::Sender<&'static str>) {
+    let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
+    let (globals, mut queue) = registry_queue_init::<LayerApp>(&conn).unwrap();
+    let qh = queue.handle();
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=4, ()).unwrap();
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+    let shell: zwlr_layer_shell_v1::ZwlrLayerShellV1 = globals.bind(&qh, 1..=4, ()).unwrap();
+    let mut app = LayerApp::default();
+    let surface = compositor.create_surface(&qh, ());
+    let ls = shell.get_layer_surface(&surface, None, layer, "prompt".into(), &qh, ());
+    ls.set_size(200, 100);
+    ls.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
+    surface.commit();
+    let t0 = Instant::now();
+    while !app.configured && !app.closed && t0.elapsed() < Duration::from_secs(5) {
+        queue.blocking_dispatch(&mut app).unwrap();
+    }
+    if app.configured && !app.closed {
+        let mut file = tempfile::tempfile_in(std::env::var("XDG_RUNTIME_DIR").unwrap()).unwrap();
+        file.write_all(&vec![0xffu8; 200 * 100 * 4]).unwrap();
+        use std::os::fd::AsFd;
+        let pool = shm.create_pool(file.as_fd(), 200 * 100 * 4, &qh, ());
+        let buffer = pool.create_buffer(0, 200, 100, 800, wl_shm::Format::Argb8888, &qh, ());
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        queue.roundtrip(&mut app).unwrap();
+    }
+    tx.send(if app.closed { "closed" } else { "shown" }).unwrap();
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_secs(5) {
+        queue.blocking_dispatch(&mut app).ok();
+    }
+}
+
+#[test]
+fn ordinary_programs_cannot_cover_the_screen_with_an_overlay_or_take_the_keyboard_unasked() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let state = Fde::new(&display.handle(), (800, 600).into());
+    let socket = ListeningSocket::bind("fde-e2e-layer").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: true };
+    let run = |hn: &mut Harness, layer| -> &'static str {
+        let (tx, rx) = mpsc::channel();
+        let path = dir.path().join("fde-e2e-layer");
+        std::thread::spawn(move || layer_client(path, layer, tx));
+        let t0 = Instant::now();
+        loop {
+            hn.pump();
+            if let Ok(m) = rx.try_recv() {
+                hn.pump_for(50);
+                return m;
+            }
+            assert!(t0.elapsed() < Duration::from_secs(10), "the program said nothing");
+            std::thread::sleep(Duration::from_millis(3));
+        }
+    };
+    let keyboard_on_a_layer = |hn: &Harness| {
+        let focus = hn.state.seat.get_keyboard().and_then(|k| k.current_focus());
+        let out = hn.state.output.clone();
+        let map = smithay::desktop::layer_map_for_output(&out);
+        focus.map(|f| map.layers().any(|l| l.wl_surface() == &f)).unwrap_or(false)
+    };
+
+    // an ordinary program: an overlay is closed, a panel is shown but gets the keyboard only by a click
+    assert_eq!(run(&mut hn, zwlr_layer_shell_v1::Layer::Overlay), "closed");
+    assert_eq!(run(&mut hn, zwlr_layer_shell_v1::Layer::Top), "shown");
+    assert!(!keyboard_on_a_layer(&hn), "an ordinary program's layer surface does not take the keyboard by itself");
+
+    // a trusted one (a launcher like fuzzel) may do both
+    hn.ordinary_clients = false;
+    assert_eq!(run(&mut hn, zwlr_layer_shell_v1::Layer::Overlay), "shown");
+    assert!(keyboard_on_a_layer(&hn), "a trusted launcher gets the keyboard at once");
+}

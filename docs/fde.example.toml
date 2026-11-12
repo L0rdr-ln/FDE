@@ -61,7 +61,9 @@ night_light_from = "20:00"       # warm hours (empty = whenever it is on)
 night_light_to = "07:00"
 
 [security]
-# programs (besides FDE's own) that may capture the screen, see and close other windows, and lock the screen;
+# programs (besides FDE's own) that may capture the screen, see and close other windows, lock the screen,
+# and put overlays above everything / take the keyboard without a click (launchers);
 # they must be installed in a system folder (/usr, /bin, /opt ...) owned by root. See SECURITY.md.
-trusted_programs = ["grim", "wf-recorder", "wl-screenrec", "xdg-desktop-portal-wlr", "swaylock", "waylock", "obs", "waybar", "nwg-panel"]
+trusted_programs = ["grim", "wf-recorder", "wl-screenrec", "xdg-desktop-portal-wlr", "swaylock", "waylock", "obs", "waybar", "nwg-panel",
+    "fuzzel", "wofi", "rofi", "tofi", "bemenu", "bemenu-run", "nwg-drawer", "wlogout", "mako", "dunst", "swaync"]
 restrict = true

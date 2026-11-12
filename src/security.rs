@@ -25,6 +25,18 @@ pub const DEFAULT_TRUSTED: &[&str] = &[
     "obs",
     "waybar",
     "nwg-panel",
+    // launchers, menus and notification programs that use overlays or take the keyboard
+    "fuzzel",
+    "wofi",
+    "rofi",
+    "tofi",
+    "bemenu",
+    "bemenu-run",
+    "nwg-drawer",
+    "wlogout",
+    "mako",
+    "dunst",
+    "swaync",
 ];
 
 /// The program on the other end of a client connection (from the kernel: SO_PEERCRED).

@@ -64,6 +64,10 @@ impl CompositorHandler for Fde {
             l.map(|l| (o, l))
         });
         if let Some((layer_output, layer)) = found {
+            // moved up to the overlay layer later (set_layer)
+            if self.refuse_untrusted_overlay(&layer, layer.layer()) {
+                return;
+            }
             layer_map_for_output(&layer_output).arrange();
             self.focus_layer_if_exclusive(&layer);
             // the first configure answers the first commit; arrange never sends it
@@ -286,6 +290,9 @@ impl WlrLayerShellHandler for Fde {
         let output = self.output_for_resource(output.as_ref());
         tracing::info!("layer surface {namespace} on {layer:?} of {}", output.name());
         let desktop_layer = DesktopLayer::new(surface, namespace);
+        if self.refuse_untrusted_overlay(&desktop_layer, layer) {
+            return;
+        }
         let mut map = layer_map_for_output(&output);
         let _ = map.map_layer(&desktop_layer);
         map.arrange();
