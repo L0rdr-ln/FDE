@@ -3860,6 +3860,7 @@ fn alt_t_tiles_the_windows_side_by_side_and_again_puts_them_back() {
     }
     let windows: Vec<_> = hn.state.space.elements().cloned().collect();
     hn.state.set_maximized(&windows[0], true);
+    hn.state.snap_window(&windows[1], fde::windows::Snap::Right);
     let front = hn.state.space.elements().last().cloned().unwrap();
     let order: Vec<_> = hn.state.space.elements().cloned().collect();
     let before: Vec<_> = windows.iter().map(|w| (hn.state.space.element_geometry(w).unwrap().loc, hn.state.is_maximized(w))).collect();
@@ -3882,5 +3883,6 @@ fn alt_t_tiles_the_windows_side_by_side_and_again_puts_them_back() {
     hn.state.toggle_tiling();
     let after: Vec<_> = windows.iter().map(|w| (hn.state.space.element_geometry(w).unwrap().loc, hn.state.is_maximized(w))).collect();
     assert_eq!(after, before, "Alt+T again: every window back, the maximized one maximized");
+    assert!(hn.state.is_snapped(&windows[1]), "and the snapped one snapped");
     assert_eq!(hn.state.space.elements().cloned().collect::<Vec<_>>(), order, "and in the same order front to back");
 }

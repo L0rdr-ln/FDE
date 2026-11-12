@@ -63,14 +63,16 @@ impl Fde {
         let windows = self.tileable_windows();
         if let Some(before) = self.tiled_before.take() {
             // the same windows, still where tiling put them: back to where they were
-            let same = before.len() == windows.len() && before.iter().all(|(w, _, _)| windows.contains(w));
+            let same = before.len() == windows.len() && before.iter().all(|(w, _, _, _)| windows.contains(w));
             if same {
-                for (w, rect, maximized) in before {
+                for (w, rect, maximized, snapped) in before {
                     self.place_client(&w, rect);
                     if maximized {
                         self.set_maximized(&w, true);
                         crate::windows::info(&w).lock().unwrap().restore = Some(rect);
                     }
+                    // a snapped window is back in its half, and still knows its place before that
+                    crate::windows::info(&w).lock().unwrap().snapped = snapped;
                 }
                 self.request_redraw();
                 return;
@@ -85,13 +87,10 @@ impl Fde {
         let mut before = Vec::new();
         for (w, cell) in windows.iter().zip(cells) {
             let maximized = self.is_maximized(w);
-            let normal = if maximized {
-                self.restore_rect(w)
-            } else {
-                self.snapped_rect(w)
-            };
+            let snapped = self.snapped_rect(w);
             let Some(now) = self.space.element_geometry(w) else { continue };
-            before.push((w.clone(), normal.unwrap_or(now), maximized));
+            let back_to = if maximized { self.restore_rect(w).unwrap_or(now) } else { now };
+            before.push((w.clone(), back_to, maximized, snapped));
             {
                 let mut i = crate::windows::info(w).lock().unwrap();
                 i.restore = None;
