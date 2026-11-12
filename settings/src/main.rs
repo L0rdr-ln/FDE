@@ -490,6 +490,41 @@ fn session_page(cfg: &Config, status: &Status) -> GBox {
     outer
 }
 
+fn security_page(cfg: &Config, status: &Status) -> GBox {
+    let (outer, body) = page(
+        "Security",
+        "Programs that may take pictures of the screen, see and close other windows, lock the screen and put overlays above everything. FDE's own programs always may. Others need to be installed by the system (in /usr) and named here.",
+    );
+    let programs = gtk4::TextView::new();
+    programs.set_wrap_mode(gtk4::WrapMode::WordChar);
+    programs.buffer().set_text(&cfg.security.trusted_programs.join(", "));
+    programs.set_size_request(-1, 90);
+    programs.add_css_class("card");
+    let restrict = gtk4::Switch::new();
+    restrict.set_active(cfg.security.restrict);
+    restrict.set_halign(Align::Start);
+    let (p2, r2, s2) = (programs.clone(), restrict.clone(), status.clone());
+    let save = debounced(move || {
+        let b = p2.buffer();
+        let text = b.text(&b.start_iter(), &b.end_iter(), false);
+        s2.report(config::set(&path(), &model::security(&text, r2.is_active())));
+    });
+    let s = save.clone();
+    programs.buffer().connect_changed(move |_| s());
+    restrict.connect_active_notify(move |_| save());
+    let label = Label::new(Some("Trusted programs (names, separated by commas)"));
+    label.set_halign(Align::Start);
+    body.append(&label);
+    body.append(&programs);
+    body.append(&row("Protect the screen", &restrict));
+    let note = Label::new(Some("Off lets every program capture the screen and cover it: not recommended. Programs that are already running keep what they had until they start again."));
+    note.add_css_class("hint");
+    note.set_wrap(true);
+    note.set_halign(Align::Start);
+    body.append(&note);
+    outer
+}
+
 fn about_page() -> GBox {
     let (outer, body) = page("About", "FDE: a Frutiger Aero desktop on Wayland.");
     for line in [
@@ -528,6 +563,7 @@ fn build(app: &gtk4::Application, quit_after: Option<u64>) {
     stack.add_titled(&keyboard_page(&cfg, &status), Some("keyboard"), "Keyboard");
     stack.add_titled(&shell_page(&cfg, &status), Some("shell"), "Desktop");
     stack.add_titled(&session_page(&cfg, &status), Some("session"), "Session");
+    stack.add_titled(&security_page(&cfg, &status), Some("security"), "Security");
     stack.add_titled(&about_page(), Some("about"), "About");
     stack.set_hexpand(true);
     stack.set_vexpand(true);
@@ -536,7 +572,7 @@ fn build(app: &gtk4::Application, quit_after: Option<u64>) {
     let sidebar = gtk4::ListBox::new();
     sidebar.set_size_request(190, -1);
     sidebar.set_selection_mode(gtk4::SelectionMode::Single);
-    let pages = [("appearance", "Appearance"), ("displays", "Displays"), ("sound", "Sound"), ("wallpaper", "Wallpaper"), ("music", "Music"), ("keyboard", "Keyboard"), ("shell", "Desktop"), ("session", "Session"), ("about", "About")];
+    let pages = [("appearance", "Appearance"), ("displays", "Displays"), ("sound", "Sound"), ("wallpaper", "Wallpaper"), ("music", "Music"), ("keyboard", "Keyboard"), ("shell", "Desktop"), ("session", "Session"), ("security", "Security"), ("about", "About")];
     for (_, title) in pages {
         let l = Label::new(Some(title));
         l.set_halign(Align::Start);

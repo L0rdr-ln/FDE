@@ -501,6 +501,7 @@ pub enum Setting {
     Int(i64),
     Float(f64),
     Bool(bool),
+    List(Vec<String>),
     /// remove the key (the theme's value applies again)
     Unset,
 }
@@ -539,6 +540,7 @@ pub fn set(path: &std::path::Path, changes: &[(&str, Setting)]) -> Result<(), St
             Setting::Int(i) => value(*i),
             Setting::Float(f) => value(*f),
             Setting::Bool(b) => value(*b),
+            Setting::List(l) => value(l.iter().map(|s| s.as_str()).collect::<toml_edit::Array>()),
         };
         // keep the comment that sits after the old value
         if let (Some(old), Some(new)) = (table.get(name).and_then(|i| i.as_value()), item.as_value_mut()) {

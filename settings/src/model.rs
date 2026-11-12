@@ -100,10 +100,44 @@ pub fn session(idle_lock_minutes: u32) -> Vec<(&'static str, Setting)> {
     vec![("session.idle_lock_seconds", Setting::Int(idle_lock_minutes as i64 * 60))]
 }
 
+/// The programs trusted with screen capture, the window list, locking and overlays, from what
+/// the user typed: names separated by commas or spaces, each once, in the order typed.
+pub fn trusted_programs(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for name in text.split(|c: char| c == ',' || c.is_whitespace()).filter(|n| !n.is_empty()) {
+        if !out.iter().any(|o| o == name) {
+            out.push(name.to_string());
+        }
+    }
+    out
+}
+
+pub fn security(programs: &str, restrict: bool) -> Vec<(&'static str, Setting)> {
+    vec![
+        ("security.trusted_programs", Setting::List(trusted_programs(programs))),
+        ("security.restrict", Setting::Bool(restrict)),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use fde::config::{set, Config};
+
+    #[test]
+    fn the_trusted_programs_are_written_as_a_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let f = dir.path().join("fde.toml");
+        std::fs::write(&f, "# mine\n[security]\nrestrict = true # keep it\n").unwrap();
+        set(&f, &security("grim, fuzzel  obs,grim", true)).unwrap();
+        let text = std::fs::read_to_string(&f).unwrap();
+        let c = Config::parse(&text).unwrap();
+        assert_eq!(c.security.trusted_programs, ["grim", "fuzzel", "obs"]);
+        assert!(c.security.restrict && text.contains("# keep it"), "{text}");
+        set(&f, &security("", false)).unwrap();
+        let c = Config::parse(&std::fs::read_to_string(&f).unwrap()).unwrap();
+        assert!(c.security.trusted_programs.is_empty() && !c.security.restrict);
+    }
 
     #[test]
     fn night_light_is_written_and_a_wrong_time_is_refused() {
