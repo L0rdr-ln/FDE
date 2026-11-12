@@ -36,6 +36,7 @@ pub mod text;
 pub mod theme;
 pub mod wallpaper;
 pub mod windows;
+pub mod winmenu;
 pub mod workspaces;
 pub mod wobble;
 pub mod xwayland;

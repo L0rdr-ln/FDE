@@ -3656,3 +3656,87 @@ fn the_windows_key_signals_the_task_bar_of_the_monitor_to_open_its_start_menu() 
     state.toggle_start_menu();
     assert!(state.panels.is_empty(), "the ended task bar {pid} was dropped");
 }
+
+#[test]
+fn right_clicking_a_title_bar_opens_the_window_menu_and_its_rows_work() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FDE_BUILTIN_SKY", "1");
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let mut renderer = match offscreen_renderer() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("no GL context here ({e}): skipped");
+            return;
+        }
+    };
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-menu").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let glass = Glass::new(&mut renderer).unwrap();
+    let mut scene: GlesTexture = create_scene(&mut renderer, (800, 600).into()).unwrap();
+    open_window(&mut hn, dir.path(), "fde-e2e-menu", 300, 200);
+    let a = hn.state.space.elements().next().cloned().unwrap();
+    let o = hn.state.outer_of(&a).unwrap();
+    let title = (o.loc.x as f64 + 60.0, o.loc.y as f64 + (hn.state.style.border + hn.state.style.titlebar * 0.5) as f64);
+
+    // right click on the title bar: the menu opens there and is drawn
+    hn.state.pointer_moved(title.into(), 0);
+    hn.state.pointer_button(0x111, true, 0);
+    hn.state.pointer_button(0x111, false, 0);
+    let menu = hn.state.window_menu.clone().expect("the window menu is open");
+    assert_eq!(menu.window, a);
+    let labels: Vec<String> = menu.items.iter().map(|i| i.label()).collect();
+    assert_eq!(labels.first().map(|s| s.as_str()), Some("Minimize"));
+    assert_eq!(labels.last().map(|s| s.as_str()), Some("Close"));
+    assert!(labels.contains(&"Always on top".to_string()) && labels.contains(&"Move to workspace 2".to_string()), "{labels:?}");
+    let out = hn.state.output.clone();
+    let before = grab_scene(&mut renderer, &mut scene);
+    hn.state.render_output(&mut renderer, &glass, &mut scene, &out).unwrap();
+    let after = grab_scene(&mut renderer, &mut scene);
+    let r = menu.rect();
+    let (mx, my) = (r.loc.x + r.size.w - 6, r.loc.y + r.size.h - 4);
+    assert_ne!(pixel(&before, 800, mx, my), pixel(&after, 800, mx, my));
+    let px = pixel(&after, 800, mx, my);
+    assert!(px[2] > px[0] + 30, "the menu's dark blue glass is drawn: {px:?}");
+
+    // the row under the pointer lights up; clicking it chooses it
+    let row_y = |i: usize| (r.loc.y + fde::winmenu::PAD + i as i32 * fde::winmenu::ROW_H + fde::winmenu::ROW_H / 2) as f64;
+    let on_top = menu.items.iter().position(|i| matches!(i, fde::winmenu::MenuItem::OnTop(false))).unwrap();
+    hn.state.pointer_moved((r.loc.x as f64 + 40.0, row_y(on_top)).into(), 0);
+    assert_eq!(hn.state.window_menu.as_ref().unwrap().hover, Some(on_top));
+    hn.state.pointer_button(0x110, true, 0);
+    hn.state.pointer_button(0x110, false, 0);
+    assert!(hn.state.window_menu.is_none(), "choosing closes the menu");
+    assert!(hn.state.is_on_top(&a), "always on top is on");
+
+    // a newer window opens and is focused, yet the one on top stays above it
+    open_window(&mut hn, dir.path(), "fde-e2e-menu", 200, 150);
+    let b = hn.state.space.elements().find(|w| **w != a).cloned().unwrap();
+    hn.state.focus_window(&b);
+    assert_eq!(hn.state.space.elements().last(), Some(&a), "the window that is always on top stays in front");
+
+    // a click elsewhere just closes the menu
+    hn.state.pointer_moved(title.into(), 0);
+    hn.state.pointer_button(0x111, true, 0);
+    hn.state.pointer_button(0x111, false, 0);
+    assert!(hn.state.window_menu.is_some());
+    hn.state.pointer_moved((790.0, 590.0).into(), 0);
+    hn.state.pointer_button(0x110, true, 0);
+    hn.state.pointer_button(0x110, false, 0);
+    assert!(hn.state.window_menu.is_none() && hn.state.space.elements().count() == 2, "nothing chosen, nothing closed");
+
+    // Close in the menu asks the program to close
+    hn.state.config.appearance.animations = true; // close_requested is tracked for the fade-out
+    hn.state.pointer_moved(title.into(), 0);
+    hn.state.pointer_button(0x111, true, 0);
+    hn.state.pointer_button(0x111, false, 0);
+    let n = hn.state.window_menu.as_ref().unwrap().items.len();
+    let r = hn.state.window_menu.as_ref().unwrap().rect();
+    hn.state.pointer_moved((r.loc.x as f64 + 40.0, (r.loc.y + fde::winmenu::PAD + (n as i32 - 1) * fde::winmenu::ROW_H + 10) as f64).into(), 0);
+    hn.state.pointer_button(0x110, true, 0);
+    hn.state.pointer_button(0x110, false, 0);
+    assert!(hn.state.close_requested(&a), "Close asked the program to close");
+}

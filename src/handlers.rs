@@ -202,6 +202,19 @@ impl XdgShellHandler for Fde {
         self.begin_client_drag(surface.wl_surface(), Some(serial), Some(edges));
     }
 
+    // a program with its own title bar was right-clicked there (GTK): our window menu, at the
+    // pointer, only while that press is held
+    fn show_window_menu(&mut self, surface: ToplevelSurface, _seat: wl_seat::WlSeat, serial: Serial, _location: smithay::utils::Point<i32, smithay::utils::Logical>) {
+        let held = self.seat.get_pointer().is_some_and(|p| p.has_grab(serial));
+        if !held {
+            return;
+        }
+        if let Some(w) = self.window_for_surface(surface.wl_surface()) {
+            let at = self.pointer_location;
+            self.open_window_menu(&w, at);
+        }
+    }
+
     fn maximize_request(&mut self, surface: ToplevelSurface) {
         if let Some(w) = self.window_for_surface(surface.wl_surface()) {
             self.set_maximized(&w, true);

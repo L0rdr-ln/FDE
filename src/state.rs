@@ -56,6 +56,8 @@ pub struct WinInfo {
     pub minimize_target: Option<Rectangle<i32, Logical>>,
     /// where it was when it was minimized
     pub last_loc: Option<Point<i32, Logical>>,
+    /// kept above the other windows (window menu: Always on top)
+    pub on_top: bool,
 }
 
 /// What a drag with the pointer is doing.
@@ -128,6 +130,10 @@ pub struct Fde {
     pub redraw_serial: u64,
     /// the shortcut cheat sheet is showing
     pub help_open: bool,
+    /// the window menu (right click on a title bar, Alt+Space), while it is open
+    pub window_menu: Option<crate::winmenu::WindowMenu>,
+    /// the press that opened or used the window menu: its release goes to nobody
+    pub swallow_release: bool,
     /// Alt was let go while the switcher was open: commit after the key event is handled
     pub switcher_commit: bool,
     /// the Windows key is down and nothing else was pressed since: letting go opens the start menu
@@ -343,6 +349,8 @@ impl Fde {
             software_renderer: false,
             redraw_serial: 1,
             help_open: false,
+            window_menu: None,
+            swallow_release: false,
             switcher_commit: false,
             super_alone: false,
             menu_requested: false,

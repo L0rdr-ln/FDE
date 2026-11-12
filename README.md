@@ -85,6 +85,7 @@ On a console FDE uses the GPU directly (DRM/KMS, libseat, libinput). Please atta
 | **Alt+drag**, title bar | move; borders resize; the three orbs minimize / maximize / close |
 | double-click the title bar | maximize or restore (pull a maximized window down to restore it) |
 | **Alt+right-drag** | resize from the nearest corner |
+| right-click the title bar, **Alt+Space** | window menu: minimize, maximize, always on top, move to a workspace, close |
 | **Windows key** | open the start menu |
 | **Alt+Tab** | the window switcher: hold Alt, press Tab to walk through the windows (most recent first, minimized ones too) as small pictures; Shift+Tab goes back; letting go of Alt picks one; Esc cancels |
 | **Alt+f**, **Alt+q** | maximize, close |

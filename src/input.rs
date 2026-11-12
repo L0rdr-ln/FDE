@@ -29,6 +29,8 @@ enum Action {
     CancelSwitcher,
     ToggleDnd,
     ToggleHelp,
+    WindowMenu,
+    MenuKey(i32, bool, bool),
     CloseHelp,
     Restore,
     Lock,
@@ -54,6 +56,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+1 .. 9", "go to a workspace (Shift: send the window there)"),
     ("Alt+Ctrl+Left / Right", "previous or next workspace"),
     ("Windows key", "open the start menu"),
+    ("Alt+Space", "the window menu (or right-click a title bar)"),
     ("Alt+L", "lock the screen"),
     ("Alt+N", "do not disturb on or off"),
     ("Print", "screenshot of this monitor"),
@@ -112,6 +115,22 @@ impl Fde {
                             state.super_alone = is_super;
                         } else if is_super && std::mem::take(&mut state.super_alone) {
                             state.menu_requested = true;
+                        }
+                        // the window menu takes the arrows, Enter and Escape while it is open
+                        if event.state() == KeyState::Pressed && state.window_menu.is_some() {
+                            let a = match sym {
+                                keysyms::KEY_Up => Some(Action::MenuKey(-1, false, false)),
+                                keysyms::KEY_Down => Some(Action::MenuKey(1, false, false)),
+                                keysyms::KEY_Return | keysyms::KEY_KP_Enter => Some(Action::MenuKey(0, true, false)),
+                                keysyms::KEY_Escape => Some(Action::MenuKey(0, false, true)),
+                                _ => None,
+                            };
+                            if let Some(a) = a {
+                                return FilterResult::Intercept(a);
+                            }
+                        }
+                        if event.state() == KeyState::Pressed && mods.alt && sym == keysyms::KEY_space {
+                            return FilterResult::Intercept(Action::WindowMenu);
                         }
                         if event.state() == KeyState::Pressed && handle.modified_sym().raw() == keysyms::KEY_Print {
                             return FilterResult::Intercept(Action::Screenshot);
@@ -232,6 +251,16 @@ impl Fde {
             Action::CancelSwitcher => self.switcher_cancel(),
             Action::ToggleDnd => self.toggle_do_not_disturb(),
             Action::ToggleHelp => self.help_open = !self.help_open,
+            Action::WindowMenu => {
+                if let Some(w) = self.space.elements().last().cloned() {
+                    let at = self.outer_of(&w).map(|o| (o.loc.x as f64 + 8.0, o.loc.y as f64 + 8.0).into()).unwrap_or(self.pointer_location);
+                    self.open_window_menu(&w, at);
+                    if let Some(m) = self.window_menu.as_mut() {
+                        m.hover = Some(0); // keyboard users start on the first row
+                    }
+                }
+            }
+            Action::MenuKey(step, enter, escape) => self.window_menu_key(step, enter, escape),
             Action::CloseHelp => self.help_open = false,
             Action::Restore => self.restore_window(),
             Action::Lock => crate::shell::start_sibling("fde-lock"),
@@ -348,6 +377,13 @@ impl Fde {
 
         let serial = SERIAL_COUNTER.next_serial();
         let Some(ptr) = self.seat.get_pointer() else { return };
+        // over the open window menu, the pointer is ours
+        if self.window_menu_motion(pos) && self.window_menu.as_ref().is_some_and(|m| m.rect().to_f64().contains(pos)) {
+            self.hover_cursor = "default";
+            ptr.motion(self, None, &MotionEvent { location: pos, serial, time });
+            ptr.frame(self);
+            return;
+        }
         let upper = self.layer_surface_under(pos, &[Layer::Overlay, Layer::Top]);
         let under = if upper.is_some() { None } else { self.window_under(pos) };
         let focus = if let Some((_, s, loc)) = &upper {
@@ -390,6 +426,13 @@ impl Fde {
 
         if self.locked {
             // straight to the lock screen
+        } else if pressed && self.window_menu.is_some() {
+            // a row is chosen, a click anywhere else closes the menu; the click goes nowhere else
+            self.window_menu_click(pos);
+            self.swallow_release = true;
+            return;
+        } else if !pressed && std::mem::take(&mut self.swallow_release) {
+            return;
         } else if !pressed {
             if let Some(drag) = self.drag.take() {
                 self.release_wobbles();
@@ -409,6 +452,13 @@ impl Fde {
             if layer.cached_state().keyboard_interactivity != KeyboardInteractivity::None {
                 self.focus_layer(&layer);
             }
+        } else if button == BTN_RIGHT && matches!(self.window_under(pos), Some((_, _, Hit::Titlebar))) {
+            if let Some((window, _, _)) = self.window_under(pos) {
+                self.focus_window(&window);
+                self.open_window_menu(&window, pos);
+            }
+            self.swallow_release = true;
+            return;
         } else if button == BTN_RIGHT && self.alt_held() {
             // Alt + right button: resize from the nearest corner
             if let Some((window, client, Hit::Client | Hit::Titlebar)) = self.window_under(pos) {

@@ -36,7 +36,7 @@ pub fn ease_out(t: f32) -> f32 {
     1.0 - (1.0 - t.clamp(0.0, 1.0)).powi(3)
 }
 
-fn info(window: &Window) -> &Mutex<WinInfo> {
+pub(crate) fn info(window: &Window) -> &Mutex<WinInfo> {
     window.user_data().get_or_insert_threadsafe(|| Mutex::new(WinInfo::default()))
 }
 
@@ -130,6 +130,7 @@ impl Fde {
             return;
         }
         self.space.raise_element(window, true);
+        self.raise_on_top_windows();
         // an X11 program knows it is the active one through its own window manager hints
         let others: Vec<Window> = self.space.elements().filter(|w| *w != window).cloned().collect();
         for w in others {

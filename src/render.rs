@@ -570,6 +570,10 @@ impl Fde {
             self.draw_help(renderer, scene, size, view)?;
         }
 
+        if self.window_menu.as_ref().is_some_and(|m| m.rect().intersection(out_rect).is_some()) {
+            self.draw_window_menu(renderer, scene, size, view)?;
+        }
+
         // "Workspace 2" for a moment after switching
         if let Some((since, text)) = self.hud.clone() {
             let age = since.elapsed().as_secs_f32();
@@ -611,6 +615,48 @@ impl Fde {
             glass.mesh.draw_multiply(&mut frame, &tex, (size.w, size.h), &[(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)], 2)?;
             let _ = frame.finish()?;
         }
+        Ok(())
+    }
+
+    /// The window menu: a glass sheet with one row per choice, the one under the pointer lit.
+    fn draw_window_menu(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        scene: &mut GlesTexture,
+        size: Size<i32, Physical>,
+        view: View,
+    ) -> Result<(), GlesError> {
+        use crate::winmenu::{PAD, ROW_H};
+        let Some(menu) = self.window_menu.clone() else { return Ok(()) };
+        let sheet = view.rect(menu.rect());
+        let mut lines: Vec<(GlesTexture, Rectangle<i32, Physical>)> = Vec::new();
+        for (i, item) in menu.items.iter().enumerate() {
+            let row = view.rect(Rectangle::new((menu.at.x + PAD, menu.at.y + PAD + i as i32 * ROW_H).into(), (crate::winmenu::WIDTH - 2 * PAD, ROW_H).into()));
+            let color = if matches!(item, crate::winmenu::MenuItem::Close) { [255, 210, 200] } else { [255, 255, 255] };
+            if let Some(img) = self.text.line(&item.label(), row.size.w - sc(16, view.scale), 13.0 * view.scale as f32, color, Some(([8, 40, 90], 0.8)), sc(2, view.scale)) {
+                let tex = renderer.import_memory(&img.rgba, Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((img.width, img.height)), false)?;
+                let dest = Rectangle::new((row.loc.x + sc(10, view.scale), row.loc.y + (row.size.h - img.height) / 2).into(), (img.width, img.height).into());
+                lines.push((tex, dest));
+            }
+        }
+        let mut target = renderer.bind(scene)?;
+        let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+        let full = Rectangle::<i32, Physical>::from_size(size);
+        // a soft shadow, the sheet, a light top edge
+        let shadow = Rectangle::<i32, Physical>::new((sheet.loc.x + sc(3, view.scale), sheet.loc.y + sc(4, view.scale)).into(), sheet.size);
+        frame.draw_solid(full, &[shadow], Color32F::new(0.0, 0.0, 0.0, 0.25))?;
+        frame.draw_solid(full, &[sheet], Color32F::new(0.06, 0.2, 0.4, 0.92))?;
+        let edge = Rectangle::<i32, Physical>::new(sheet.loc, (sheet.size.w, sc(1, view.scale).max(1)).into());
+        frame.draw_solid(full, &[edge], Color32F::new(0.7, 0.88, 1.0, 0.8))?;
+        if let Some(h) = menu.hover {
+            let lit = view.rect(Rectangle::new((menu.at.x + PAD / 2, menu.at.y + PAD + h as i32 * ROW_H).into(), (crate::winmenu::WIDTH - PAD, ROW_H).into()));
+            frame.draw_solid(full, &[lit], Color32F::new(0.45, 0.75, 1.0, 0.45))?;
+        }
+        for (tex, dest) in &lines {
+            let src = Rectangle::<f64, BufferCoord>::from_size((tex.size().w as f64, tex.size().h as f64).into());
+            frame.render_texture_from_to(tex, src, *dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, 1.0, None, &[])?;
+        }
+        let _ = frame.finish()?;
         Ok(())
     }
 
