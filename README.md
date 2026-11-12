@@ -59,7 +59,16 @@ See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Try it
 
-Nested in a window of your current desktop (X11 or Wayland):
+**Ready-built** (Ubuntu 24.04+, Debian 13+, x86_64): download the archive from the
+[releases](https://github.com/L0rdr-ln/FDE/releases), then
+
+```sh
+tar xzf fde-*-x86_64-linux.tar.gz && cd fde-*-x86_64-linux
+sudo ./install.sh --deps && sudo ./install.sh    # then pick "FDE" on the login screen
+fde --check                                     # what FDE finds on this machine
+```
+
+**From source**, nested in a window of your current desktop (X11 or Wayland):
 
 ```sh
 cargo run &                         # opens a window; the task bar starts with it
@@ -74,8 +83,8 @@ git clone https://github.com/L0rdr-ln/FDE fde && fde/tools/vm-setup.sh
 ~/start-fde            # on a console: Ctrl+Alt+F3, log in, then run it
 ```
 
-On a console FDE uses the GPU directly (DRM/KMS, libseat, libinput). Please attach
-`~/fde-last.log` to a report if something is wrong.
+On a console FDE uses the GPU directly (DRM/KMS, libseat, libinput); see [docs/HARDWARE.md](docs/HARDWARE.md).
+Please attach the output of `fde --check` and `~/fde-last.log` to a report if something is wrong.
 
 ## Keys
 

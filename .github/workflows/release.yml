@@ -1,0 +1,44 @@
+name: release
+# Push a tag like v0.1.0: the workspace is built on Ubuntu 24.04 and packed with tools/package.sh,
+# and the archive (with its sha256) is attached to a GitHub release of that tag.
+on:
+  push:
+    tags: ["v*"]
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libudev-dev libseat-dev libinput-dev libgbm-dev \
+            libegl-dev libgles-dev libxkbcommon-dev libdrm-dev libwayland-dev \
+            libegl1-mesa-dev libgl1-mesa-dri libglib2.0-bin libgtk-4-dev libasound2-dev
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: The tag matches the version in Cargo.toml
+        run: |
+          v="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          test "v$v" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME but Cargo.toml says $v"; exit 1; }
+      - name: Build and pack
+        run: tools/package.sh
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.tar.gz.sha256
+          body: |
+            Built on Ubuntu 24.04 (x86_64). Runs on Ubuntu 24.04 or newer, Debian 13 or newer.
+
+            ```
+            tar xzf fde-*-x86_64-linux.tar.gz && cd fde-*-x86_64-linux
+            sudo ./install.sh --deps     # the libraries FDE needs (apt)
+            sudo ./install.sh            # into /usr/local, with an "FDE" session on the login screen
+            fde --check                  # what FDE finds on this machine
+            ```
+
+            `./install.sh --user` installs into ~/.local instead (no login-screen entry; start it with `start-fde` on a console).

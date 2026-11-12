@@ -39,3 +39,12 @@ against the compositor inside the test process.
 `music/` the background music player (needs `libasound2-dev`), `settings/` the GTK4 control panel (separate crate, needs `libgtk-4-dev`; `cargo test --workspace` builds it), `src/glass` the renderer, `src/*.rs` the compositor, `src/bin/` the shell programs
 (`fde-panel`, `fde-lock`), `tests/e2e.rs` end-to-end tests, `docs/` architecture, roadmap and
 plans.
+
+## Making a release
+
+1. Set the version in `Cargo.toml` (and `settings/Cargo.toml`, `music/Cargo.toml`), run `cargo build`
+   so `Cargo.lock` follows, and commit.
+2. `git tag v0.2.0 && git push origin v0.2.0` — the `release` workflow builds the archive with
+   `tools/package.sh` and attaches it to a GitHub release. The tag must match the version.
+
+`tools/package.sh` makes the same archive locally (in `dist/`).

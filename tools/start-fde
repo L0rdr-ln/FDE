@@ -1,0 +1,17 @@
+#!/bin/sh
+# Starts an FDE session: from a login screen (the FDE session entry) or from a console.
+# What it prints goes to ~/.local/state/fde/session.log.
+here="$(dirname "$(readlink -f "$0")")"
+fde="$here/fde"
+[ -x "$fde" ] || fde="$(command -v fde)"
+log_dir="${XDG_STATE_HOME:-$HOME/.local/state}/fde"
+mkdir -p "$log_dir"
+export XDG_CURRENT_DESKTOP=FDE XDG_SESSION_DESKTOP=fde XDG_SESSION_TYPE=wayland
+export RUST_LOG="${RUST_LOG:-info}"
+# toolkits on Wayland
+export MOZ_ENABLE_WAYLAND=1 QT_QPA_PLATFORM="${QT_QPA_PLATFORM:-wayland;xcb}" SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-wayland,x11}"
+# a session bus, if the login did not bring one
+if [ -z "$DBUS_SESSION_BUS_ADDRESS" ] && command -v dbus-run-session >/dev/null; then
+    exec dbus-run-session -- "$fde" "$@" >"$log_dir/session.log" 2>&1
+fi
+exec "$fde" "$@" >"$log_dir/session.log" 2>&1
