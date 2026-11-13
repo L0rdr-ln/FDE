@@ -14,7 +14,7 @@ glow = 1.0
 shadow = 1.0
 rim = 1.0
 title_ink = "#06233d"
-title_ink_dim = "#465868"
+title_ink_dim = "#26394c"
 title_glow = 0.95
 
 [buttons]

@@ -12,6 +12,7 @@ pub mod cursortheme;
 pub mod demo;
 pub mod foreign_toplevel;
 pub mod gestures;
+pub mod icons;
 pub mod glass;
 pub mod handlers;
 pub mod input;

@@ -34,6 +34,7 @@ wayland-protocols = { version = "0.32", features = ["client", "server", "staging
 wayland-protocols-wlr = { version = "0.3", features = ["client", "server"] }
 libc = "0.2"
 x11rb = "0.13"
+resvg = { version = "0.45", default-features = false }
 xcursor = "0.3"
 zbus = "5"
 serde = { version = "1", features = ["derive"] }

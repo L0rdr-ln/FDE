@@ -21,11 +21,16 @@ pub struct Task {
     pub title: String,
     pub active: bool,
     pub minimized: bool,
+    /// the program's icon, `TASK_ICON` logical pixels at the bar's scale
+    pub icon: Option<crate::icons::Icon>,
 }
+
+/// Size of the icons on the task buttons (logical pixels).
+pub const TASK_ICON: i32 = 22;
 
 const TASKS_LEFT: i32 = ORB_MARGIN * 2 + ORB_SIZE + 6;
 const TASK_GAP: i32 = 4;
-const TASK_MAX_W: i32 = 170;
+const TASK_MAX_W: i32 = 190;
 const CLOCK_ROOM: i32 = 90;
 
 /// The x range and the y range of task button `i` of `n` in a panel `width` wide.
@@ -96,18 +101,21 @@ pub fn draw(text: &mut TextRenderer, width: i32, height: i32, s: i32, hover: boo
     let pal = crate::theme::palette();
     for y in 0..height {
         let t = y as f32 / (height - 1).max(1) as f32;
-        // a strip in the accent colour, lighter at the top, with a gloss over the upper half
-        let base = pal.tone(t);
-        let alpha = (0.55 + 0.15 * t) + (0.97 - (0.55 + 0.15 * t)) * pal.solid;
+        // dark tinted glass (the accent deep down), a sheen over the upper part, and a crisp
+        // light edge on top with a dark line under it, like the Aero task bar
+        let base = pal.dark(0.50 + 0.18 * t);
+        let alpha = 0.74 + 0.08 * t + 0.18 * pal.solid;
         for x in 0..width {
             let i = ((y * width + x) * 4) as usize;
             let px = &mut buf[i..i + 4];
             blend(px, base, alpha);
-            if t < 0.5 {
-                blend(px, [1.0, 1.0, 1.0], (0.20 * (1.0 - t * 2.0) + 0.05) * pal.shine);
+            if t < 0.48 {
+                blend(px, [1.0, 1.0, 1.0], 0.13 * (1.0 - t / 0.48) * pal.shine + 0.03);
             }
             if y < s {
-                blend(px, [1.0, 1.0, 1.0], 0.55 * pal.shine.max(0.35 * pal.solid));
+                blend(px, [1.0, 1.0, 1.0], 0.55 * pal.shine.max(0.4));
+            } else if y < 2 * s {
+                blend(px, [0.0, 0.0, 0.0], 0.30);
             }
         }
     }
@@ -162,26 +170,37 @@ pub fn draw(text: &mut TextRenderer, width: i32, height: i32, s: i32, hover: boo
                     continue;
                 }
                 let t = (y - y0) as f32 / (y1 - y0) as f32;
-                let (base, a) = if task.active {
-                    (pal.light(0.5), 0.55 - 0.15 * t)
-                } else if task.minimized {
-                    (pal.dark(0.2), 0.18)
-                } else {
-                    (pal.light(0.15), 0.32 - 0.10 * t)
-                };
                 let i = ((y * width + x) * 4) as usize;
-                blend(&mut buf[i..i + 4], base, a * cover);
-                if t < 0.45 {
-                    blend(&mut buf[i..i + 4], [1.0, 1.0, 1.0], 0.12 * cover * pal.shine);
+                let px = &mut buf[i..i + 4];
+                if task.active {
+                    // lit glass: brighter, with a glow of the accent rising from the bottom
+                    blend(px, [1.0, 1.0, 1.0], (0.20 - 0.08 * t) * cover);
+                    let cxn = ((x as f32 + 0.5 - (x0 + x1) as f32 / 2.0) / ((x1 - x0) as f32 / 2.0)).abs();
+                    let glow = (t - 0.35).max(0.0) / 0.65 * (1.0 - cxn * cxn).max(0.0);
+                    blend(px, pal.light(0.45), 0.55 * glow * cover);
+                } else if !task.minimized {
+                    blend(px, [1.0, 1.0, 1.0], (0.08 - 0.04 * t) * cover);
+                }
+                if t < 0.45 && !task.minimized {
+                    blend(px, [1.0, 1.0, 1.0], 0.10 * (1.0 - t / 0.45) * cover * pal.shine);
                 }
                 if d > -1.2 * sf {
-                    blend(&mut buf[i..i + 4], [1.0, 1.0, 1.0], 0.40 * cover);
+                    let edge = if task.active { 0.60 } else if task.minimized { 0.14 } else { 0.30 };
+                    blend(px, [1.0, 1.0, 1.0], edge * cover);
+                } else if d > -2.2 * sf {
+                    blend(px, [0.0, 0.0, 0.0], 0.18 * cover);
                 }
             }
         }
-        let color = if task.minimized { [220, 235, 250] } else { [255, 255, 255] };
-        if let Some(img) = text.line(&task.title, x1 - x0 - 14 * s, 13.0 * sf, color, pal.glow(0.8), 2 * s) {
-            blit(&mut buf, width, height, &img, x0 + 8 * s, (height - img.height) / 2);
+        // the program's icon, then its title
+        let mut tx = x0 + 8 * s;
+        if let Some(icon) = &task.icon {
+            crate::icons::blit_icon(&mut buf, width, height, icon, x0 + 7 * s, (height - icon.size) / 2, if task.minimized { 0.55 } else { 1.0 });
+            tx = x0 + 7 * s + icon.size + 6 * s;
+        }
+        let color = if task.minimized { [200, 215, 230] } else { [255, 255, 255] };
+        if let Some(img) = text.line(&task.title, x1 - tx - 6 * s, 13.0 * sf, color, Some(([0, 0, 0], 0.55)), 2 * s) {
+            blit(&mut buf, width, height, &img, tx, (height - img.height) / 2);
         }
     }
     // the clock, with a soft glow, at the right
@@ -274,8 +293,10 @@ pub fn draw_status(
     rects
 }
 
-pub const MENU_W: i32 = 320;
-pub const MENU_ROW: i32 = 28;
+pub const MENU_W: i32 = 380;
+pub const MENU_ROW: i32 = 30;
+/// Size of the icons in the start menu (logical pixels).
+pub const MENU_ICON: i32 = 22;
 const MENU_PAD: i32 = 8;
 pub const MENU_MAX_ROWS: usize = 16;
 const SEARCH_H: i32 = 38;
@@ -320,7 +341,8 @@ pub fn menu_row_at(y: f64, n: usize) -> Option<usize> {
 
 /// The start menu at `s` pixels per logical pixel: a glass sheet with rounded corners and one
 /// row per entry. The picture is `menu_size()` times `s`.
-pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String], hover: Option<usize>, power: &PowerView) -> Vec<u8> {
+#[allow(clippy::too_many_arguments)]
+pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String], icons: &[Option<&crate::icons::Icon>], hover: Option<usize>, power: &PowerView) -> Vec<u8> {
     let (lw, lh) = menu_size();
     let (w, h) = (lw * s, lh * s);
     let sf = s as f32;
@@ -339,12 +361,15 @@ pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String],
             let t = y as f32 / h as f32;
             let i = ((y * w + x) * 4) as usize;
             let px = &mut buf[i..i + 4];
-            blend(px, pal.tone(t), (0.62 + 0.35 * pal.solid) * cover);
-            if t < 0.25 {
-                blend(px, [1.0, 1.0, 1.0], 0.16 * (1.0 - t * 4.0) * cover * pal.shine);
+            // the same dark glass as the task bar, with a sheen at the top and a light rim
+            blend(px, pal.dark(0.42 + 0.2 * t), (0.80 + 0.17 * pal.solid) * cover);
+            if t < 0.2 {
+                blend(px, [1.0, 1.0, 1.0], 0.14 * (1.0 - t * 5.0) * cover * pal.shine);
             }
             if d > -1.5 * sf {
-                blend(px, [1.0, 1.0, 1.0], 0.45 * cover);
+                blend(px, [1.0, 1.0, 1.0], 0.50 * cover);
+            } else if d > -2.5 * sf {
+                blend(px, [0.0, 0.0, 0.0], 0.25 * cover);
             }
         }
     }
@@ -369,21 +394,60 @@ pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String],
     if let Some(img) = text.line(shown_text, sw - 28 * s, 14.0 * sf, color, None, 0) {
         blit(&mut buf, w, h, &img, sx0 + 14 * s, sy0 + (sh - img.height) / 2);
     }
-    for (i, name) in names.iter().take(MENU_MAX_ROWS).enumerate() {
-        let y0 = (MENU_PAD + SEARCH_H + i as i32 * MENU_ROW) * s;
-        if hover == Some(i) {
-            for y in y0..y0 + MENU_ROW * s {
-                for x in MENU_PAD * s..w - MENU_PAD * s {
-                    let t = (y - y0) as f32 / (MENU_ROW * s) as f32;
-                    let idx = ((y * w + x) * 4) as usize;
-                    blend(&mut buf[idx..idx + 4], pal.light(0.75), 0.55 - 0.2 * t);
+    // the list: a light, almost white sheet, as in the Aero start menu
+    {
+        let (_, mh) = menu_size();
+        let (lx0, ly0, lx1, ly1) = (MENU_PAD * s, (MENU_PAD + SEARCH_H - 2) * s, w - MENU_PAD * s, (mh - POWER_H - 2) * s);
+        let lrad = 6.0 * sf;
+        for y in ly0..ly1 {
+            for x in lx0..lx1 {
+                let dx = (x as f32 + 0.5 - (lx0 + lx1) as f32 / 2.0).abs() - ((lx1 - lx0) as f32 / 2.0 - lrad);
+                let dy = (y as f32 + 0.5 - (ly0 + ly1) as f32 / 2.0).abs() - ((ly1 - ly0) as f32 / 2.0 - lrad);
+                let d = dx.max(0.0).hypot(dy.max(0.0)) - lrad;
+                let cover = (0.5 - d).clamp(0.0, 1.0);
+                if cover <= 0.0 {
+                    continue;
+                }
+                let idx = ((y * w + x) * 4) as usize;
+                let t = (y - ly0) as f32 / (ly1 - ly0) as f32;
+                blend(&mut buf[idx..idx + 4], [0.985 - 0.03 * t, 0.99 - 0.02 * t, 1.0], 0.96 * cover);
+                if d > -1.2 * sf {
+                    blend(&mut buf[idx..idx + 4], [0.55, 0.65, 0.78], 0.6 * cover);
                 }
             }
         }
-        let color = if hover == Some(i) { [10, 50, 100] } else { [255, 255, 255] };
-        let glow = if hover == Some(i) { None } else { pal.glow(0.8) };
-        if let Some(img) = text.line(name, w - 2 * MENU_PAD * s - 16 * s, 14.0 * sf, color, glow, 2 * s) {
-            blit(&mut buf, w, h, &img, (MENU_PAD + 10) * s, y0 + (MENU_ROW * s - img.height) / 2);
+    }
+    for (i, name) in names.iter().take(MENU_MAX_ROWS).enumerate() {
+        let y0 = (MENU_PAD + SEARCH_H + i as i32 * MENU_ROW) * s;
+        if hover == Some(i) {
+            // the Aero hover: a pale blue gradient with a blue rim and round corners
+            let (hx0, hx1, hy0, hy1) = ((MENU_PAD + 4) * s, w - (MENU_PAD + 4) * s, y0 + s, y0 + (MENU_ROW - 1) * s);
+            let hrad = 3.0 * sf;
+            for y in hy0..hy1 {
+                for x in hx0..hx1 {
+                    let dx = (x as f32 + 0.5 - (hx0 + hx1) as f32 / 2.0).abs() - ((hx1 - hx0) as f32 / 2.0 - hrad);
+                    let dy = (y as f32 + 0.5 - (hy0 + hy1) as f32 / 2.0).abs() - ((hy1 - hy0) as f32 / 2.0 - hrad);
+                    let d = dx.max(0.0).hypot(dy.max(0.0)) - hrad;
+                    let cover = (0.5 - d).clamp(0.0, 1.0);
+                    if cover <= 0.0 {
+                        continue;
+                    }
+                    let t = (y - hy0) as f32 / (hy1 - hy0) as f32;
+                    let idx = ((y * w + x) * 4) as usize;
+                    blend(&mut buf[idx..idx + 4], [0.90 - 0.08 * t, 0.95 - 0.05 * t, 1.0], cover);
+                    if d > -1.2 * sf {
+                        blend(&mut buf[idx..idx + 4], [0.45, 0.65, 0.9], 0.8 * cover);
+                    }
+                }
+            }
+        }
+        let mut tx = (MENU_PAD + 12) * s;
+        if let Some(Some(icon)) = icons.get(i) {
+            crate::icons::blit_icon(&mut buf, w, h, icon, tx, y0 + (MENU_ROW * s - icon.size) / 2, 1.0);
+            tx += icon.size + 10 * s;
+        }
+        if let Some(img) = text.line(name, w - tx - (MENU_PAD + 8) * s, 14.0 * sf, [24, 34, 52], None, 0) {
+            blit(&mut buf, w, h, &img, tx, y0 + (MENU_ROW * s - img.height) / 2);
         }
     }
     // the power row: a thin line and five small glass buttons
@@ -430,7 +494,7 @@ pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String],
             let label = if armed { "Sure?" } else { action.label };
             let color = if hot && !armed { [10, 50, 100] } else { [255, 255, 255] };
             let glow = if hot && !armed { None } else { pal.glow(0.7) };
-            if let Some(img) = text.line(label, x1 - x0 - 4 * s, 11.0 * sf, color, glow, s) {
+            if let Some(img) = text.line(label, x1 - x0, 11.0 * sf, color, glow, s) {
                 blit(&mut buf, w, h, &img, x0 + (x1 - x0 - img.width) / 2, y0 + (y1 - y0 - img.height) / 2);
             }
         }
@@ -446,7 +510,7 @@ mod tests {
     fn the_orb_is_green_and_the_strip_is_blue_with_a_clock() {
         let mut text = TextRenderer::default();
         let (w, h) = (400, HEIGHT);
-        let buf = draw(&mut text, w, h, 1, false, "12:34", &[Task { title: "Files".into(), active: true, minimized: false }, Task { title: "Terminal".into(), ..Default::default() }]);
+        let buf = draw(&mut text, w, h, 1, false, "12:34", &[Task { title: "Files".into(), active: true, ..Default::default() }, Task { title: "Terminal".into(), ..Default::default() }]);
         let at = |x: i32, y: i32| {
             let i = ((y * w + x) * 4) as usize;
             [buf[i] as i32, buf[i + 1] as i32, buf[i + 2] as i32, buf[i + 3] as i32]
@@ -479,7 +543,7 @@ mod tests {
         let mut text = TextRenderer::default();
         let names: Vec<String> = ["Files", "Terminal", "Settings"].iter().map(|s| s.to_string()).collect();
         let (w, h) = menu_size();
-        let buf = draw_menu(&mut text, 1, "", &names, Some(1), &PowerView::default());
+        let buf = draw_menu(&mut text, 1, "", &names, &[], Some(1), &PowerView::default());
         let at = |x: i32, y: i32| {
             let i = ((y * w + x) * 4) as usize;
             [buf[i] as i32, buf[i + 1] as i32, buf[i + 2] as i32, buf[i + 3] as i32]
@@ -487,7 +551,8 @@ mod tests {
         assert_eq!(at(0, 0)[3], 0, "the corner is transparent");
         assert!(at(w / 2, h / 2)[3] > 100, "the sheet is translucent, not empty");
         let (hi, plain) = (at(w - 20, MENU_PAD + SEARCH_H + MENU_ROW + 14), at(w - 20, MENU_PAD + SEARCH_H + 14));
-        assert!(hi[0] > plain[0] + 40, "the hovered row is lighter: {hi:?} {plain:?}");
+        assert!(plain[0] > 230 && plain[1] > 230, "the list is a light sheet: {plain:?}");
+        assert!(hi[2] - hi[0] > plain[2] - plain[0] + 15, "the hovered row is pale blue: {hi:?} {plain:?}");
         assert_eq!(menu_row_at((MENU_PAD + SEARCH_H + MENU_ROW + 3) as f64, 3), Some(1));
         assert_eq!(menu_row_at(2.0, 3), None, "the search field is not a row");
         assert_eq!(menu_row_at((MENU_PAD + SEARCH_H + 3 * MENU_ROW + 3) as f64, 3), None, "below the last row");
@@ -567,6 +632,6 @@ mod tests {
         let (one, two) = (orb_width(1), orb_width(2));
         assert!((one - ORB_SIZE).abs() <= 4 && (two - 2 * ORB_SIZE).abs() <= 6, "the orb is about 32 px wide at 1x and 64 px at 2x: {one} {two}");
         let (mw, mh) = menu_size();
-        assert_eq!(draw_menu(&mut text, 2, "", &[], None, &PowerView::default()).len() as i32, mw * 2 * mh * 2 * 4);
+        assert_eq!(draw_menu(&mut text, 2, "", &[], &[], None, &PowerView::default()).len() as i32, mw * 2 * mh * 2 * 4);
     }
 }

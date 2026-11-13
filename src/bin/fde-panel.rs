@@ -64,12 +64,15 @@ struct Toplevel {
     task: panel::Task,
     /// what arrives before `done`
     next: panel::Task,
+    /// the program's name for itself (its icon is looked up by it)
+    app_id: String,
+    next_app_id: String,
 }
 
 impl Dispatch<manager_mod::ZwlrForeignToplevelManagerV1, ()> for App {
     fn event(app: &mut Self, _: &manager_mod::ZwlrForeignToplevelManagerV1, event: manager_mod::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
         if let manager_mod::Event::Toplevel { toplevel } = event {
-            app.toplevels.push(Toplevel { handle: toplevel, task: Default::default(), next: Default::default() });
+            app.toplevels.push(Toplevel { handle: toplevel, task: Default::default(), next: Default::default(), app_id: String::new(), next_app_id: String::new() });
         }
     }
     wayland_client::event_created_child!(App, manager_mod::ZwlrForeignToplevelManagerV1, [
@@ -82,6 +85,7 @@ impl Dispatch<handle_mod::ZwlrForeignToplevelHandleV1, ()> for App {
         let Some(i) = app.toplevels.iter().position(|t| &t.handle == handle) else { return };
         match event {
             handle_mod::Event::Title { title } => app.toplevels[i].next.title = title,
+            handle_mod::Event::AppId { app_id } => app.toplevels[i].next_app_id = app_id,
             handle_mod::Event::State { state } => {
                 let t = &mut app.toplevels[i].next;
                 t.active = false;
@@ -96,8 +100,9 @@ impl Dispatch<handle_mod::ZwlrForeignToplevelHandleV1, ()> for App {
             }
             handle_mod::Event::Done => {
                 let t = &mut app.toplevels[i];
-                if t.task != t.next {
+                if t.task != t.next || t.app_id != t.next_app_id {
                     t.task = t.next.clone();
+                    t.app_id = t.next_app_id.clone();
                     app.tasks_changed = true;
                 }
             }
@@ -330,6 +335,23 @@ fn clock() -> String {
         .unwrap_or_default()
 }
 
+/// The icon of a window's program: from its desktop file, else by its app id, else a generic one.
+fn window_icon(icons: &mut fde::icons::IconCache, apps: &[fde::apps::App], app_id: &str, px: i32) -> Option<fde::icons::Icon> {
+    let app = fde::apps::for_window(apps, app_id);
+    let name = app.and_then(|a| a.icon.clone()).unwrap_or_else(|| app_id.to_lowercase());
+    let label = app.map(|a| a.name.as_str()).unwrap_or(app_id);
+    icons.get(&name, px, fallback_icons(label)).cloned()
+}
+
+/// Generic icons for a program without a usable one of its own (terminals get a terminal).
+fn fallback_icons(name: &str) -> &'static [&'static str] {
+    if name.to_lowercase().contains("term") {
+        &["utilities-terminal", "terminal", "application-x-executable"]
+    } else {
+        &["application-x-executable", "applications-other"]
+    }
+}
+
 /// The terminal of the configuration (or $FDE_TERMINAL).
 fn terminal() -> String {
     std::env::var("FDE_TERMINAL").unwrap_or_else(|_| fde::config::Config::load().unwrap_or_default().shell.terminal)
@@ -483,6 +505,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // for screenshots and tests: open the start menu at once
     app.toggle_menu = std::env::var_os("FDE_PANEL_OPEN_MENU").is_some();
     let entries = fde::apps::installed();
+    let mut icons = fde::icons::IconCache::default();
     let mut filtered: Vec<usize> = Vec::new();
 
     while !app.closed {
@@ -554,7 +577,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         if dirty {
             size = app.size;
-            let tasks: Vec<panel::Task> = app.toplevels.iter().map(|t| t.task.clone()).collect();
+            let s_now = app.scale.current();
+            let tasks: Vec<panel::Task> = app
+                .toplevels
+                .iter()
+                .map(|t| panel::Task { icon: window_icon(&mut icons, &entries, &t.app_id, panel::TASK_ICON * s_now), ..t.task.clone() })
+                .collect();
             let s = app.scale.current();
             let room_before = panel::right_room();
             let mut rgba = panel::draw(&mut text, size.0 * s, size.1 * s, s, app.hover, &current_clock, &tasks);
@@ -660,9 +688,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(m) = &mut menu {
             if app.menu_configured && app.menu_dirty {
                 app.menu_dirty = false;
-                let names: Vec<String> = filtered.iter().take(panel::MENU_MAX_ROWS).filter_map(|&i| entries.get(i)).map(|e| e.name.clone()).collect();
+                let shown: Vec<&fde::apps::App> = filtered.iter().take(panel::MENU_MAX_ROWS).filter_map(|&i| entries.get(i)).collect();
+                let names: Vec<String> = shown.iter().map(|e| e.name.clone()).collect();
                 let s = app.scale.current();
-                let px = panel::draw_menu(&mut text, s, &app.query, &names, app.menu_hover, &panel::PowerView { hover: app.power_hover, armed: app.power_armed });
+                let menu_icons: Vec<Option<fde::icons::Icon>> = shown
+                    .iter()
+                    .map(|e| icons.get(e.icon.as_deref().unwrap_or(""), panel::MENU_ICON * s, fallback_icons(&e.name)).cloned())
+                    .collect();
+                let icon_refs: Vec<Option<&fde::icons::Icon>> = menu_icons.iter().map(|i| i.as_ref()).collect();
+                let px = panel::draw_menu(&mut text, s, &app.query, &names, &icon_refs, app.menu_hover, &panel::PowerView { hover: app.power_hover, armed: app.power_armed });
                 let (mw, mh) = panel::menu_size();
                 attach(&shm, &qh, &m.surface, &mut m.file, px, (mw * s, mh * s), s)?;
             }

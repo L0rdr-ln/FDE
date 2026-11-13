@@ -192,21 +192,28 @@ pub fn draw(text: &mut TextRenderer, s: i32, notes: &[&Note]) -> Vec<u8> {
                 let t = y as f32 / bubble_h as f32;
                 let idx = (((y0 + y) * w + x) * 4) as usize;
                 let px = &mut buf[idx..idx + 4];
-                let base = if note.critical { [0.85, 0.30, 0.20] } else { pal.tone(t) };
-                blend(px, base, 0.70 * cover);
+                // the dark glass of the task bar (red for critical ones), a sheen, a light rim
+                let base = if note.critical { [0.62, 0.16, 0.10] } else { pal.dark(0.45 + 0.15 * t) };
+                blend(px, base, (0.84 + 0.14 * pal.solid) * cover);
                 if t < 0.4 {
-                    blend(px, [1.0, 1.0, 1.0], 0.18 * (1.0 - t / 0.4) * cover * pal.shine);
+                    blend(px, [1.0, 1.0, 1.0], 0.14 * (1.0 - t / 0.4) * cover * pal.shine);
                 }
                 if d > -1.5 * sf {
                     blend(px, [1.0, 1.0, 1.0], 0.5 * cover);
+                } else if d > -2.5 * sf {
+                    blend(px, [0.0, 0.0, 0.0], 0.25 * cover);
                 }
             }
         }
         if let Some(img) = text.line(&note.summary, w - 32 * s, 15.0 * sf, [255, 255, 255], pal.glow(0.9), 2 * s) {
             blit(&mut buf, w, h, &img, 16 * s, y0 + 12 * s);
         }
-        if let Some(img) = text.line(&note.body, w - 32 * s, 13.0 * sf, [235, 245, 255], pal.glow(0.7), 2 * s) {
-            blit(&mut buf, w, h, &img, 16 * s, y0 + 40 * s);
+        // the message: on two lines when there are no buttons below it
+        let lines = if note.buttons().is_empty() { wrap(text, &note.body, w - 32 * s, 13.0 * sf, 2) } else { vec![note.body.clone()] };
+        for (li, line) in lines.iter().enumerate() {
+            if let Some(img) = text.line(line, w - 32 * s, 13.0 * sf, [225, 238, 252], Some(([0, 0, 0], 0.5)), 2 * s) {
+                blit(&mut buf, w, h, &img, 16 * s, y0 + (38 + 18 * li as i32) * s);
+            }
         }
         // the buttons the program asked for
         for (bi, (_, label)) in note.buttons().into_iter().enumerate() {
@@ -234,6 +241,33 @@ pub fn draw(text: &mut TextRenderer, s: i32, notes: &[&Note]) -> Vec<u8> {
         }
     }
     buf
+}
+
+/// `text` broken into at most `max_lines` lines of whole words that fit `width` pixels; the
+/// last line keeps the rest (and is cut with "…" when drawn).
+pub fn wrap(renderer: &mut crate::text::TextRenderer, text: &str, width: i32, px: f32, max_lines: usize) -> Vec<String> {
+    let fits = |r: &mut crate::text::TextRenderer, s: &str| r.line(s, 100_000, px, [255, 255, 255], None, 0).map(|img| img.width <= width).unwrap_or(true);
+    let words: Vec<&str> = text.split_whitespace().collect();
+    let mut lines: Vec<String> = Vec::new();
+    let mut i = 0;
+    while i < words.len() {
+        if lines.len() + 1 == max_lines {
+            lines.push(words[i..].join(" "));
+            break;
+        }
+        let mut line = words[i].to_string();
+        i += 1;
+        while i < words.len() {
+            let longer = format!("{line} {}", words[i]);
+            if !fits(renderer, &longer) {
+                break;
+            }
+            line = longer;
+            i += 1;
+        }
+        lines.push(line);
+    }
+    lines
 }
 
 #[cfg(test)]

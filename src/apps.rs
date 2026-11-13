@@ -1,14 +1,21 @@
 //! The applications a start menu lists, read from freedesktop `.desktop` files.
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 pub struct App {
     pub name: String,
     pub exec: String,
+    /// the icon's name in the icon themes (or a path)
+    pub icon: Option<String>,
+    /// the desktop file's name without `.desktop` ("org.gnome.Nautilus"): what a Wayland
+    /// program normally calls itself (its app id)
+    pub id: String,
+    /// the X11 class its windows have, if the file says
+    pub wm_class: Option<String>,
 }
 
 /// One `.desktop` file: an application to show, or None (hidden, not an application, no command).
 pub fn parse_desktop(text: &str) -> Option<App> {
-    let (mut name, mut exec, mut kind) = (None, None, None);
+    let (mut name, mut exec, mut kind, mut icon, mut wm_class) = (None, None, None, None, None);
     let mut hidden = false;
     let mut in_entry = false;
     for line in text.lines() {
@@ -25,6 +32,8 @@ pub fn parse_desktop(text: &str) -> Option<App> {
                 "Name" => name = Some(v.to_string()),
                 "Exec" => exec = Some(v.to_string()),
                 "Type" => kind = Some(v.to_string()),
+                "Icon" => icon = Some(v.to_string()),
+                "StartupWMClass" => wm_class = Some(v.to_string()),
                 "NoDisplay" | "Hidden" if v == "true" => hidden = true,
                 _ => {}
             }
@@ -40,7 +49,7 @@ pub fn parse_desktop(text: &str) -> Option<App> {
     if exec.is_empty() {
         return None;
     }
-    Some(App { name: name?, exec })
+    Some(App { name: name?, exec, icon, id: String::new(), wm_class })
 }
 
 /// All applications installed, sorted by name.
@@ -54,7 +63,8 @@ pub fn installed() -> Vec<App> {
         let Ok(rd) = std::fs::read_dir(d) else { continue };
         for e in rd.flatten() {
             if e.path().extension().map(|x| x == "desktop").unwrap_or(false) {
-                if let Some(a) = std::fs::read_to_string(e.path()).ok().and_then(|t| parse_desktop(&t)) {
+                if let Some(mut a) = std::fs::read_to_string(e.path()).ok().and_then(|t| parse_desktop(&t)) {
+                    a.id = e.path().file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
                     apps.push(a);
                 }
             }
@@ -63,6 +73,22 @@ pub fn installed() -> Vec<App> {
     apps.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
     apps.dedup_by(|a, b| a.name == b.name);
     apps
+}
+
+/// The installed app a window belongs to, from the window's app id (Wayland) or class (X11):
+/// the desktop file of that name, or one that names that X11 class, or one called that.
+pub fn for_window<'a>(apps: &'a [App], app_id: &str) -> Option<&'a App> {
+    let id = app_id.to_lowercase();
+    if id.is_empty() {
+        return None;
+    }
+    let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_lowercase();
+    apps.iter()
+        .find(|a| a.id.to_lowercase() == id)
+        .or_else(|| apps.iter().find(|a| a.wm_class.as_deref().is_some_and(|c| c.to_lowercase() == id)))
+        .or_else(|| apps.iter().find(|a| last(&a.id) == last(&id)))
+        .or_else(|| apps.iter().find(|a| a.name.to_lowercase() == id))
+        .or_else(|| apps.iter().find(|a| a.exec.split_whitespace().next().is_some_and(|e| e.rsplit('/').next().unwrap_or(e).to_lowercase() == id)))
 }
 
 /// The apps whose name contains `query` (case does not matter), names that start with it first,
@@ -93,14 +119,33 @@ mod tests {
     #[test]
     fn reads_applications_and_skips_the_rest() {
         let a = parse_desktop("[Desktop Entry]\nType=Application\nName=Files\nName[de]=Dateien\nExec=nautilus --new-window %U\n[Desktop Action x]\nName=Other\nExec=nope\n").unwrap();
-        assert_eq!(a, App { name: "Files".into(), exec: "nautilus --new-window".into() });
+        assert_eq!(a, App { name: "Files".into(), exec: "nautilus --new-window".into(), ..Default::default() });
+        let b = parse_desktop("[Desktop Entry]\nType=Application\nName=Term\nExec=xterm\nIcon=utilities-terminal\nStartupWMClass=XTerm\n").unwrap();
+        assert_eq!((b.icon.as_deref(), b.wm_class.as_deref()), (Some("utilities-terminal"), Some("XTerm")));
         assert!(parse_desktop("[Desktop Entry]\nType=Application\nName=X\nExec=x\nNoDisplay=true\n").is_none());
         assert!(parse_desktop("[Desktop Entry]\nType=Link\nName=X\nExec=x\n").is_none());
     }
 
     #[test]
+    fn a_window_finds_its_app_by_id_class_or_name() {
+        let app = |id: &str, name: &str, exec: &str, class: Option<&str>| App { id: id.into(), name: name.into(), exec: exec.into(), wm_class: class.map(String::from), ..Default::default() };
+        let apps = vec![
+            app("org.gnome.Nautilus", "Files", "nautilus", None),
+            app("featherpad", "FeatherPad", "featherpad", None),
+            app("debian-xterm", "XTerm", "xterm", Some("XTerm")),
+            app("firefox_firefox", "Firefox", "/snap/bin/firefox", None),
+        ];
+        assert_eq!(for_window(&apps, "org.gnome.Nautilus").unwrap().name, "Files");
+        assert_eq!(for_window(&apps, "featherpad").unwrap().name, "FeatherPad");
+        assert_eq!(for_window(&apps, "XTerm").unwrap().name, "XTerm", "an X11 class");
+        assert_eq!(for_window(&apps, "nautilus").unwrap().name, "Files", "the last part of the id");
+        assert_eq!(for_window(&apps, "firefox").unwrap().name, "Firefox", "the program it runs");
+        assert!(for_window(&apps, "unknown").is_none());
+    }
+
+    #[test]
     fn search_finds_by_part_of_the_name_and_ranks_prefixes_first() {
-        let app = |n: &str| App { name: n.into(), exec: "x".into() };
+        let app = |n: &str| App { name: n.into(), exec: "x".into(), ..Default::default() };
         let apps = vec![app("Calculator"), app("Files"), app("Image Viewer"), app("LibreOffice Calc"), app("Terminal")];
         assert_eq!(filter(&apps, ""), vec![0, 1, 2, 3, 4]);
         assert_eq!(filter(&apps, "calc"), vec![0, 3]);
