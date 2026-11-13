@@ -55,10 +55,14 @@ impl CompositorHandler for Fde {
             if let Some(top) = window.toplevel() {
                 if !top.is_initial_configure_sent() {
                     // the program has said what it is by now: open it where it was last
-                    self.restore_placement(&window);
+                    if self.restore_placement(&window) {
+                        crate::windows::info(&window).lock().unwrap().fitted = true;
+                    }
                     top.send_configure();
                 }
             }
+            // the first picture: now its size is known, and it should fit on the screen
+            self.fit_new_window(&window);
         }
         // a layer surface (panel, wallpaper, launcher): lay the layers out again
         let found = self.all_outputs().into_iter().find_map(|o| {
@@ -169,17 +173,53 @@ impl XdgShellHandler for Fde {
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
         surface.with_pending_state(|state| {
             state.geometry = positioner.get_geometry();
+            state.positioner = positioner;
         });
+        self.unconstrain_popup(&surface);
         let _ = self.popups.track_popup(PopupKind::Xdg(surface));
     }
 
-    fn grab(&mut self, _surface: PopupSurface, _seat: wl_seat::WlSeat, _serial: Serial) {}
+    // a menu takes the keyboard (arrows, Escape) and the pointer: a click outside closes it
+    fn grab(&mut self, surface: PopupSurface, seat: wl_seat::WlSeat, serial: Serial) {
+        use smithay::desktop::{find_popup_root_surface, PopupKeyboardGrab, PopupPointerGrab, PopupUngrabStrategy};
+        use smithay::input::pointer::Focus;
+        let Some(seat) = Seat::<Fde>::from_resource(&seat) else { return };
+        self.popups.cleanup();
+        self.end_finished_popup_grab();
+        let kind = PopupKind::Xdg(surface);
+        let Ok(root) = find_popup_root_surface(&kind) else { return };
+        if self.window_for_surface(&root).is_none() {
+            return; // menus of panels and the like: no grab
+        }
+        let Ok(mut grab) = self.popups.grab_popup(root, kind, &seat, serial) else { return };
+        if let Some(keyboard) = seat.get_keyboard() {
+            if keyboard.is_grabbed() && !(keyboard.has_grab(serial) || keyboard.has_grab(grab.previous_serial().unwrap_or(serial))) {
+                grab.ungrab(PopupUngrabStrategy::All);
+                return;
+            }
+            keyboard.set_focus(self, grab.current_grab(), serial);
+            keyboard.set_grab(self, PopupKeyboardGrab::new(&grab), serial);
+        }
+        if let Some(pointer) = seat.get_pointer() {
+            if pointer.is_grabbed() && !(pointer.has_grab(serial) || pointer.has_grab(grab.previous_serial().unwrap_or_else(|| grab.serial()))) {
+                grab.ungrab(PopupUngrabStrategy::All);
+                return;
+            }
+            pointer.set_grab(self, PopupPointerGrab::new(&grab), serial, Focus::Keep);
+        }
+        self.popup_grab = Some(grab);
+    }
+
+    fn popup_destroyed(&mut self, _surface: PopupSurface) {
+        self.popups.cleanup();
+    }
 
     fn reposition_request(&mut self, surface: PopupSurface, positioner: PositionerState, token: u32) {
         surface.with_pending_state(|state| {
             state.geometry = positioner.get_geometry();
             state.positioner = positioner;
         });
+        self.unconstrain_popup(&surface);
         surface.send_repositioned(token);
     }
 

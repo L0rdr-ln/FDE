@@ -58,6 +58,8 @@ pub struct WinInfo {
     pub last_loc: Option<Point<i32, Logical>>,
     /// kept above the other windows (window menu: Always on top)
     pub on_top: bool,
+    /// moved onto the screen once its size was known (or placed where it was last)
+    pub fitted: bool,
 }
 
 /// What a drag with the pointer is doing.
@@ -132,6 +134,8 @@ pub struct Fde {
     pub help_open: bool,
     /// the window menu (right click on a title bar, Alt+Space), while it is open
     pub window_menu: Option<crate::winmenu::WindowMenu>,
+    /// the open menu of a program that holds the keyboard and pointer
+    pub popup_grab: Option<smithay::desktop::PopupGrab<Fde>>,
     /// what the last Alt+T tiled, and where each window was (and whether it was maximized) before
     pub tiled_before: Option<Vec<(Window, Rectangle<i32, Logical>, bool, Option<Rectangle<i32, Logical>>)>>,
     /// where each program's window was last closed
@@ -354,6 +358,7 @@ impl Fde {
             redraw_serial: 1,
             help_open: false,
             window_menu: None,
+            popup_grab: None,
             tiled_before: None,
             placements: crate::placement::load(),
             swallow_release: false,

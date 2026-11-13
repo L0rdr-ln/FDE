@@ -146,7 +146,7 @@ impl Harness {
                 .unwrap();
         }
         self.display.dispatch_clients(&mut self.state).unwrap();
-        self.state.finish_unlock();
+        self.state.after_dispatch();
         self.display.flush_clients().unwrap();
     }
 
@@ -3923,4 +3923,216 @@ fn with_two_keyboard_layouts_the_next_one_is_a_key_or_a_signal_away() {
     }
     assert!(arrived, "the request arrived");
     assert!(!fde::kblayout::take_request(), "once");
+}
+
+// ------------------------------------------------------------------ menus (xdg popups with a grab)
+
+use wayland_protocols::xdg::shell::client::{xdg_popup, xdg_positioner};
+
+#[derive(Debug, PartialEq)]
+enum PopMsg {
+    Ready,
+    Shown(u32),
+    Done(u32),
+}
+
+#[derive(Default)]
+struct PopApp {
+    configured: bool,
+    tx: Option<mpsc::Sender<PopMsg>>,
+    qh: Option<QueueHandle<PopApp>>,
+    compositor: Option<wl_compositor::WlCompositor>,
+    wm: Option<xdg_wm_base::XdgWmBase>,
+    seat: Option<wl_seat::WlSeat>,
+    parent: Option<xdg_surface::XdgSurface>,
+    buffer: Option<wl_buffer::WlBuffer>,
+    /// the open menu: its number, popup, xdg surface and surface
+    popup: Option<(u32, xdg_popup::XdgPopup, xdg_surface::XdgSurface, wl_surface::WlSurface)>,
+    count: u32,
+}
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for PopApp {
+    fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+}
+delegate_noop!(PopApp: ignore wl_compositor::WlCompositor);
+delegate_noop!(PopApp: ignore wl_surface::WlSurface);
+delegate_noop!(PopApp: ignore wl_shm::WlShm);
+delegate_noop!(PopApp: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(PopApp: ignore wl_buffer::WlBuffer);
+delegate_noop!(PopApp: ignore wl_seat::WlSeat);
+delegate_noop!(PopApp: ignore xdg_toplevel::XdgToplevel);
+delegate_noop!(PopApp: ignore xdg_positioner::XdgPositioner);
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for PopApp {
+    fn event(_: &mut Self, wm: &xdg_wm_base::XdgWmBase, event: xdg_wm_base::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm.pong(serial);
+        }
+    }
+}
+impl Dispatch<xdg_surface::XdgSurface, u32> for PopApp {
+    fn event(app: &mut Self, s: &xdg_surface::XdgSurface, event: xdg_surface::Event, n: &u32, _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            s.ack_configure(serial);
+            if *n == 0 {
+                app.configured = true;
+            } else if let Some((m, _, _, surface)) = &app.popup {
+                if m == n {
+                    surface.attach(app.buffer.as_ref(), 0, 0);
+                    surface.commit();
+                    let _ = app.tx.as_ref().unwrap().send(PopMsg::Shown(*n));
+                }
+            }
+        }
+    }
+}
+impl Dispatch<xdg_popup::XdgPopup, u32> for PopApp {
+    fn event(app: &mut Self, _: &xdg_popup::XdgPopup, event: xdg_popup::Event, n: &u32, _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_popup::Event::PopupDone = event {
+            let _ = app.tx.as_ref().unwrap().send(PopMsg::Done(*n));
+        }
+    }
+}
+impl Dispatch<wl_pointer::WlPointer, ()> for PopApp {
+    fn event(app: &mut Self, _: &wl_pointer::WlPointer, event: wl_pointer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        let qh = app.qh.clone().unwrap();
+        match event {
+            // a press opens a menu with a grab, like a drop-down list
+            wl_pointer::Event::Button { serial, state: wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed), .. } if app.popup.is_none() => {
+                app.count += 1;
+                let n = app.count;
+                let surface = app.compositor.as_ref().unwrap().create_surface(&qh, ());
+                let xs = app.wm.as_ref().unwrap().get_xdg_surface(&surface, &qh, n);
+                let pos = app.wm.as_ref().unwrap().create_positioner(&qh, ());
+                pos.set_size(100, 50);
+                pos.set_anchor_rect(10, 10, 20, 20);
+                let popup = xs.get_popup(app.parent.as_ref(), &pos, &qh, n);
+                popup.grab(app.seat.as_ref().unwrap(), serial);
+                surface.commit();
+                app.popup = Some((n, popup, xs, surface));
+            }
+            // letting go chooses an item: the program closes its menu itself
+            wl_pointer::Event::Button { state: wayland_client::WEnum::Value(wl_pointer::ButtonState::Released), .. } => {
+                if let Some((_, popup, xs, surface)) = app.popup.take() {
+                    popup.destroy();
+                    xs.destroy();
+                    surface.destroy();
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+fn popup_client(path: std::path::PathBuf, tx: mpsc::Sender<PopMsg>, stop: Arc<std::sync::atomic::AtomicBool>) {
+    let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
+    let (globals, mut queue) = registry_queue_init::<PopApp>(&conn).unwrap();
+    let qh = queue.handle();
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=4, ()).unwrap();
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+    let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=1, ()).unwrap();
+    let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=1, ()).unwrap();
+    let mut app = PopApp { tx: Some(tx.clone()), qh: Some(qh.clone()), ..Default::default() };
+    let surface = compositor.create_surface(&qh, ());
+    let xs = wm.get_xdg_surface(&surface, &qh, 0u32);
+    let _top = xs.get_toplevel(&qh, ());
+    surface.commit();
+    while !app.configured {
+        queue.blocking_dispatch(&mut app).unwrap();
+    }
+    let (w, h) = (300, 200);
+    let mut file = tempfile::tempfile_in(std::env::var("XDG_RUNTIME_DIR").unwrap()).unwrap();
+    file.write_all(&vec![0xc0u8; (w * h * 4) as usize]).unwrap();
+    use std::os::fd::AsFd;
+    let pool = shm.create_pool(file.as_fd(), w * h * 4, &qh, ());
+    let buffer = pool.create_buffer(0, w, h, w * 4, wl_shm::Format::Argb8888, &qh, ());
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let _pointer = seat.get_pointer(&qh, ());
+    app.compositor = Some(compositor);
+    app.wm = Some(wm);
+    app.seat = Some(seat);
+    app.parent = Some(xs);
+    app.buffer = Some(buffer);
+    queue.roundtrip(&mut app).unwrap();
+    tx.send(PopMsg::Ready).unwrap();
+    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+        queue.blocking_dispatch(&mut app).ok();
+    }
+}
+
+#[test]
+fn a_program_can_open_a_menu_right_after_closing_one() {
+    use smithay::wayland::seat::WaylandFocus;
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-popup").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (path, s2) = (dir.path().join("fde-e2e-popup"), stop.clone());
+    std::thread::spawn(move || popup_client(path, tx, s2));
+    let wait_for = |hn: &mut Harness, rx: &mpsc::Receiver<PopMsg>, want: PopMsg| {
+        let t0 = Instant::now();
+        loop {
+            hn.pump();
+            if let Ok(m) = rx.try_recv() {
+                assert!(!matches!(m, PopMsg::Done(_)), "a menu was closed by FDE: {m:?} (waiting for {want:?})");
+                if m == want {
+                    return;
+                }
+            }
+            assert!(t0.elapsed() < Duration::from_secs(10), "no {want:?}");
+            std::thread::sleep(Duration::from_millis(3));
+        }
+    };
+    wait_for(&mut hn, &rx, PopMsg::Ready);
+    hn.pump_for(50);
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    hn.state.pointer_moved((g.loc.x as f64 + 50.0, g.loc.y as f64 + 50.0).into(), 0);
+    hn.pump_for(30);
+
+    // the first menu opens, holds the keyboard, and the program closes it when the button is up
+    hn.state.pointer_button(0x110, true, 1);
+    wait_for(&mut hn, &rx, PopMsg::Shown(1));
+    assert!(hn.state.popup_grab.is_some(), "the menu holds the keyboard and pointer");
+    let focus = hn.state.seat.get_keyboard().unwrap().current_focus();
+    assert!(focus.is_some() && focus != win.wl_surface().map(|s| s.into_owned()), "the keyboard is the menu's");
+    hn.state.pointer_button(0x110, false, 2);
+    hn.pump_for(100);
+    assert!(hn.state.popup_grab.is_none(), "the menu is gone, and so is its hold");
+    assert_eq!(hn.state.seat.get_keyboard().unwrap().current_focus(), win.wl_surface().map(|s| s.into_owned()), "the keyboard is back with the window");
+
+    // right after, the next menu opens and stays open (before, FDE closed it at once)
+    hn.state.pointer_button(0x110, true, 3);
+    wait_for(&mut hn, &rx, PopMsg::Shown(2));
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_millis(300) {
+        hn.pump();
+        assert_ne!(rx.try_recv().ok(), Some(PopMsg::Done(2)), "the second menu was closed by FDE");
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    assert!(hn.state.popup_grab.is_some());
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+}
+
+#[test]
+fn a_new_window_too_big_for_where_it_opens_is_moved_onto_the_screen() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-fit").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    // 700 x 480 opened at the cascade (70, 70 and further) would hang over the right and bottom
+    open_window(&mut hn, dir.path(), "fde-e2e-fit", 700, 480);
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    let area = hn.state.usable_area(&hn.state.output.clone());
+    let outer = hn.state.outer_of(&win).unwrap();
+    assert!(area.contains_rect(outer), "{outer:?} fits in {area:?}");
 }

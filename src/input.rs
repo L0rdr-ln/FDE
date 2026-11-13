@@ -443,6 +443,9 @@ impl Fde {
             return;
         } else if !pressed && std::mem::take(&mut self.swallow_release) {
             return;
+        } else if pressed && self.seat.get_pointer().is_some_and(|p| p.is_grabbed()) {
+            // a program's menu is open and holds the pointer: the click is for it (one outside
+            // closes the menu)
         } else if !pressed {
             if let Some(drag) = self.drag.take() {
                 self.release_wobbles();

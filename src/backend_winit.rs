@@ -55,7 +55,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         Generic::new(poll_fd, Interest::READ, Mode::Level),
         move |_, _, state| {
             display.dispatch_clients(state).expect("dispatch");
-            state.finish_unlock();
+            state.after_dispatch();
             display.flush_clients().expect("flush");
             Ok(PostAction::Continue)
         },

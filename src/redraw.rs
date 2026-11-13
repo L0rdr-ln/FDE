@@ -4,6 +4,9 @@
 
 use std::time::{Duration, Instant};
 
+use smithay::reexports::wayland_server::Resource;
+use smithay::utils::IsAlive;
+
 use crate::state::Fde;
 
 /// The longest a monitor goes without being drawn.
@@ -23,6 +26,38 @@ impl Fde {
     /// An unlock was asked for: it counts only if the lock object of the program that locked is
     /// gone now (its unlock destroys it). Any other request (a program that never held the lock)
     /// leaves the screen locked.
+    /// After the programs' requests of a round are handled: forget closed menus (which also ends
+    /// a menu's hold on the keyboard and pointer), and finish an unlock.
+    pub fn after_dispatch(&mut self) {
+        self.popups.cleanup();
+        self.end_finished_popup_grab();
+        self.finish_unlock();
+    }
+
+    /// The program's menu is gone (closed by a choice, by Escape, or by the program): give the
+    /// keyboard and pointer back at once. Smithay's grab would only notice at the next key press,
+    /// and until then the program's next menu would be refused and close straight away.
+    pub fn end_finished_popup_grab(&mut self) {
+        let ended = self.popup_grab.as_ref().is_some_and(|g| g.has_ended());
+        if !ended {
+            return;
+        }
+        // the window the menu belonged to (once the menu is gone, the grab names it)
+        let root = self.popup_grab.take().and_then(|g| g.current_grab());
+        if let Some(kb) = self.seat.get_keyboard() {
+            kb.unset_grab(self);
+            // the keyboard goes back to that window, unless it went elsewhere meanwhile
+            let on_dead_or_menu = kb.current_focus().is_none_or(|f| !f.alive() || f.client() == root.as_ref().and_then(|r| r.client()));
+            if on_dead_or_menu && root.as_ref().is_some_and(|r| r.alive()) && !self.locked {
+                kb.set_focus(self, root, smithay::utils::SERIAL_COUNTER.next_serial());
+            }
+        }
+        if let Some(ptr) = self.seat.get_pointer() {
+            let time = self.start_time.elapsed().as_millis() as u32;
+            ptr.unset_grab(self, smithay::utils::SERIAL_COUNTER.next_serial(), time);
+        }
+    }
+
     pub fn finish_unlock(&mut self) {
         if !self.unlock_pending {
             return;

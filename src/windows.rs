@@ -327,6 +327,61 @@ impl Fde {
         }
     }
 
+    /// A new window has drawn its first picture: if it hangs over the edge of the usable area
+    /// from where it was cascaded, move it in (to the top left corner if it is bigger than all).
+    pub fn fit_new_window(&mut self, window: &Window) {
+        if info(window).lock().unwrap().fitted {
+            return;
+        }
+        let Some(g) = self.space.element_geometry(window) else { return };
+        if g.size.w <= 0 || g.size.h <= 0 {
+            return; // no picture yet
+        }
+        info(window).lock().unwrap().fitted = true;
+        if self.is_maximized(window) || self.is_fullscreen(window) || self.is_override_redirect(window) {
+            return;
+        }
+        let area = self.usable_area(&self.output_for_window(window));
+        let style = self.frame_style(window);
+        let outer = outer_rect(g, &style);
+        let fit = |pos: i32, len: i32, start: i32, room: i32| -> i32 { pos.min(start + room - len).max(start) };
+        let x = fit(outer.loc.x, outer.size.w, area.loc.x, area.size.w);
+        let y = fit(outer.loc.y, outer.size.h, area.loc.y, area.size.h);
+        // bigger than the screen: ask the program to fit (it may not go that small)
+        let room = crate::layout::client_rect(area, &style).size;
+        if g.size.w > room.w || g.size.h > room.h {
+            if let Some(top) = window.toplevel() {
+                top.with_pending_state(|s| s.size = Some((g.size.w.min(room.w), g.size.h.min(room.h)).into()));
+                top.send_pending_configure();
+            }
+        }
+        if (x, y) != (outer.loc.x, outer.loc.y) {
+            let loc = g.loc + Point::from((x - outer.loc.x, y - outer.loc.y));
+            self.space.map_element(window.clone(), loc, false);
+            if let Some(x11) = window.x11_surface() {
+                let _ = x11.configure(Some(Rectangle::new(loc, g.size)));
+            }
+        }
+    }
+
+    /// Keep a menu on the monitor of its window: the program says how it may be moved or flipped
+    /// (to the left of a button at the right edge, above one near the bottom).
+    pub fn unconstrain_popup(&self, popup: &smithay::wayland::shell::xdg::PopupSurface) {
+        use smithay::desktop::{find_popup_root_surface, get_popup_toplevel_coords, PopupKind};
+        let kind = PopupKind::Xdg(popup.clone());
+        let Ok(root) = find_popup_root_surface(&kind) else { return };
+        let Some(window) = self.window_for_surface(&root) else { return };
+        let Some(win) = self.space.element_geometry(&window) else { return };
+        let area = self.output_rect(&self.output_for_window(&window));
+        // the target is in the coordinates of the popup's parent
+        let mut target = area;
+        target.loc -= get_popup_toplevel_coords(&kind);
+        target.loc -= win.loc;
+        popup.with_pending_state(|state| {
+            state.geometry = state.positioner.get_unconstrained_geometry(target);
+        });
+    }
+
     /// Where a snapped window goes back to.
     pub fn snapped_rect(&self, window: &Window) -> Option<Rectangle<i32, Logical>> {
         info(window).lock().unwrap().snapped
