@@ -18,10 +18,10 @@ title_ink_dim = "#8a6a4a"
 title_glow = 0.95
 
 [buttons]
-style = "orb"
+style = "capsule"
 size = 18
-gap = 7
-margin = 9
+gap = 1
+margin = 6
 close = "#d93a1a"
 maximize = "#f2b01c"
 minimize = "#ff8a1c"

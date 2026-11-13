@@ -345,9 +345,30 @@ const SEARCH_H: i32 = 38;
 /// the power row at the bottom of the menu
 pub const POWER_H: i32 = 40;
 
-/// Size of the start menu: a search field and room for `MENU_MAX_ROWS` entries, always.
+// How many programs the start menu shows at most: `MENU_MAX_ROWS`, fewer on a short screen. The
+// task bar draws on one thread.
+thread_local! {
+    static MENU_ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(MENU_MAX_ROWS) };
+}
+
+pub fn menu_max_rows() -> usize {
+    MENU_ROWS.with(|r| r.get())
+}
+
+/// How many rows fit above the task bar on a monitor `logical_height` high (and at least 3).
+pub fn rows_for_height(logical_height: i32) -> usize {
+    let fixed = HEIGHT + 4 + 8 + SEARCH_H + 2 * MENU_PAD + POWER_H;
+    (((logical_height - fixed) / MENU_ROW).max(3) as usize).min(MENU_MAX_ROWS)
+}
+
+/// Fit the start menu to a monitor `logical_height` high.
+pub fn fit_menu_to_height(logical_height: i32) {
+    MENU_ROWS.with(|r| r.set(rows_for_height(logical_height)));
+}
+
+/// Size of the start menu: a search field and room for `menu_max_rows()` entries, always.
 pub fn menu_size() -> (i32, i32) {
-    (MENU_W, SEARCH_H + MENU_MAX_ROWS as i32 * MENU_ROW + 2 * MENU_PAD + POWER_H)
+    (MENU_W, SEARCH_H + menu_max_rows() as i32 * MENU_ROW + 2 * MENU_PAD + POWER_H)
 }
 
 /// The rectangle of power button `i` (x0, y0, x1, y1), in menu pixels.
@@ -378,7 +399,7 @@ pub struct PowerView {
 /// Which menu row (of `n` shown) is at height `y`?
 pub fn menu_row_at(y: f64, n: usize) -> Option<usize> {
     let row = ((y - (MENU_PAD + SEARCH_H) as f64) / MENU_ROW as f64).floor();
-    (row >= 0.0 && (row as usize) < n.min(MENU_MAX_ROWS)).then_some(row as usize)
+    (row >= 0.0 && (row as usize) < n.min(menu_max_rows())).then_some(row as usize)
 }
 
 /// The start menu at `s` pixels per logical pixel: a glass sheet with rounded corners and one
@@ -460,7 +481,7 @@ pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String],
             }
         }
     }
-    for (i, name) in names.iter().take(MENU_MAX_ROWS).enumerate() {
+    for (i, name) in names.iter().take(menu_max_rows()).enumerate() {
         let y0 = (MENU_PAD + SEARCH_H + i as i32 * MENU_ROW) * s;
         if hover == Some(i) {
             // the Aero hover: a pale blue gradient with a blue rim and round corners
@@ -660,7 +681,21 @@ mod tests {
         seen.dedup();
         assert_eq!(seen.len(), 5);
         assert_eq!(power_at(5.0, 5.0), None);
-        assert_eq!(menu_row_at((h - 20) as f64, MENU_MAX_ROWS), None, "the power row is not a program row");
+        assert_eq!(menu_row_at((h - 20) as f64, menu_max_rows()), None, "the power row is not a program row");
+    }
+
+    #[test]
+    fn the_menu_has_fewer_rows_on_a_short_screen() {
+        assert_eq!(rows_for_height(1080), MENU_MAX_ROWS, "a tall screen shows them all");
+        assert!(rows_for_height(400) < MENU_MAX_ROWS && rows_for_height(400) >= 3, "{}", rows_for_height(400));
+        assert_eq!(rows_for_height(100), 3, "never fewer than three");
+        // the menu plus the bar and the gap above it always fit
+        for h in [320, 400, 500, 600, 768, 800] {
+            fit_menu_to_height(h);
+            let (_, mh) = menu_size();
+            assert!(mh + HEIGHT + 12 <= h || menu_max_rows() == 3, "height {h}: menu {mh}");
+        }
+        fit_menu_to_height(2000);
     }
 
     #[test]

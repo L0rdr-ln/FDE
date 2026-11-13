@@ -353,6 +353,16 @@ fn fallback_icons(name: &str) -> &'static [&'static str] {
     }
 }
 
+/// Make the start menu fit the monitor this task bar is on (the compositor lists its monitors).
+fn fit_menu_to_screen() {
+    let name = std::env::var("FDE_PANEL_OUTPUT").ok();
+    let outputs = fde::outputs::read_outputs_state();
+    let mine = outputs.iter().find(|o| Some(&o.name) == name.as_ref()).or_else(|| outputs.first());
+    if let Some(o) = mine {
+        panel::fit_menu_to_height((o.height as f64 / o.scale.max(0.5)) as i32);
+    }
+}
+
 /// The terminal of the configuration (or $FDE_TERMINAL).
 fn terminal() -> String {
     std::env::var("FDE_TERMINAL").unwrap_or_else(|_| fde::config::Config::load().unwrap_or_default().shell.terminal)
@@ -625,11 +635,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if menu.is_some() {
                 app.close_menu = true;
             } else if !entries.is_empty() {
+                fit_menu_to_screen();
                 let m = open_menu(&compositor, &shell, &qh, &blur_manager, my_output.as_ref());
                 app.menu_surface = Some(m.surface.clone());
                 app.query.clear();
                 filtered = fde::apps::filter(&entries, "");
-                app.menu_entries = filtered.len().min(panel::MENU_MAX_ROWS);
+                app.menu_entries = filtered.len().min(panel::menu_max_rows());
                 app.menu_configured = false;
                 menu = Some(m);
             } else {
@@ -640,7 +651,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if app.query_changed {
                 app.query_changed = false;
                 filtered = fde::apps::filter(&entries, &app.query);
-                app.menu_entries = filtered.len().min(panel::MENU_MAX_ROWS);
+                app.menu_entries = filtered.len().min(panel::menu_max_rows());
                 // the best match is selected, so Enter starts it
                 app.menu_hover = if filtered.is_empty() { None } else { Some(0) };
                 app.menu_dirty = true;
@@ -696,7 +707,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if let Some(m) = &mut menu {
             if app.menu_configured && app.menu_dirty {
                 app.menu_dirty = false;
-                let shown: Vec<&fde::apps::App> = filtered.iter().take(panel::MENU_MAX_ROWS).filter_map(|&i| entries.get(i)).collect();
+                let shown: Vec<&fde::apps::App> = filtered.iter().take(panel::menu_max_rows()).filter_map(|&i| entries.get(i)).collect();
                 let names: Vec<String> = shown.iter().map(|e| e.name.clone()).collect();
                 let s = app.scale.current();
                 let menu_icons: Vec<Option<fde::icons::Icon>> = shown

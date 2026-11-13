@@ -5,11 +5,11 @@ A theme is one small TOML file. FDE comes with the six members of the Frutiger f
 
 | id | look |
 |---|---|
-| `aero` | Frutiger Aero: glossy blue glass, round orbs, the sky and hill wallpaper (default) |
+| `aero` | Frutiger Aero: glossy blue glass, a glass capsule of buttons, the sky and hill wallpaper (default) |
 | `frutiger-metro` | the loud one: saturated green, crisp frames, hot-pink and yellow accents |
-| `eco` | Frutiger Eco: fresh green glass, leaf-coloured orbs, sky fading into grass |
-| `dorific` | Dorific: the warm one, glossy orange glass, amber orbs, cream and sunset gradients |
-| `vector-flourish` | Vector Flourish: light and airy, white and pastel glass, pink, green and blue orbs |
+| `eco` | Frutiger Eco: fresh green glass, sky fading into grass |
+| `dorific` | Dorific: the warm one, glossy orange glass, cream and sunset gradients |
+| `vector-flourish` | Vector Flourish: light and airy, white and pastel glass |
 | `aqua` | Frutiger Aqua: water and aquariums, cyan-teal glass, a wallpaper that deepens like the sea |
 
 These are homages drawn from scratch to match how the looks are remembered. They use no artwork
