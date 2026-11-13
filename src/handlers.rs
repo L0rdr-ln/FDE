@@ -383,6 +383,7 @@ impl WlrLayerShellHandler for Fde {
 
 delegate_compositor!(Fde);
 delegate_layer_shell!(Fde);
+smithay::delegate_pointer_gestures!(Fde);
 smithay::delegate_session_lock!(Fde);
 
 impl smithay::wayland::session_lock::SessionLockHandler for Fde {

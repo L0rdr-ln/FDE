@@ -134,6 +134,9 @@ pub struct Fde {
     pub help_open: bool,
     /// the window menu (right click on a title bar, Alt+Space), while it is open
     pub window_menu: Option<crate::winmenu::WindowMenu>,
+    /// a three-finger swipe in progress (it switches workspaces)
+    pub swipe: Option<crate::gestures::Swipe>,
+    pub pointer_gestures_state: smithay::wayland::pointer_gestures::PointerGesturesState,
     /// the picture a program shows under the pointer while something is dragged
     pub dnd_icon: Option<smithay::reexports::wayland_server::protocol::wl_surface::WlSurface>,
     /// tells XWayland which X11 window has the keyboard
@@ -362,6 +365,8 @@ impl Fde {
             redraw_serial: 1,
             help_open: false,
             window_menu: None,
+            swipe: None,
+            pointer_gestures_state: smithay::wayland::pointer_gestures::PointerGesturesState::new::<Fde>(dh),
             dnd_icon: None,
             xfocus: None,
             popup_grab: None,

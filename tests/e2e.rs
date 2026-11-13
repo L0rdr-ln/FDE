@@ -4427,3 +4427,146 @@ fn a_drag_shows_its_picture_under_the_pointer_until_the_drop() {
     assert!(hn.state.dnd_icon.is_none(), "and gone after the drop");
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
 }
+
+// ------------------------------------------------------------------ touchpad gestures
+
+use wayland_protocols::wp::pointer_gestures::zv1::client::{zwp_pointer_gesture_pinch_v1, zwp_pointer_gestures_v1};
+
+#[derive(Default)]
+struct PinchApp {
+    configured: bool,
+    tx: Option<mpsc::Sender<String>>,
+}
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for PinchApp {
+    fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+}
+delegate_noop!(PinchApp: ignore wl_compositor::WlCompositor);
+delegate_noop!(PinchApp: ignore wl_surface::WlSurface);
+delegate_noop!(PinchApp: ignore wl_shm::WlShm);
+delegate_noop!(PinchApp: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(PinchApp: ignore wl_buffer::WlBuffer);
+delegate_noop!(PinchApp: ignore wl_seat::WlSeat);
+delegate_noop!(PinchApp: ignore wl_pointer::WlPointer);
+delegate_noop!(PinchApp: ignore xdg_toplevel::XdgToplevel);
+delegate_noop!(PinchApp: ignore zwp_pointer_gestures_v1::ZwpPointerGesturesV1);
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for PinchApp {
+    fn event(_: &mut Self, wm: &xdg_wm_base::XdgWmBase, event: xdg_wm_base::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm.pong(serial);
+        }
+    }
+}
+impl Dispatch<xdg_surface::XdgSurface, ()> for PinchApp {
+    fn event(app: &mut Self, s: &xdg_surface::XdgSurface, event: xdg_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            s.ack_configure(serial);
+            app.configured = true;
+        }
+    }
+}
+impl Dispatch<zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1, ()> for PinchApp {
+    fn event(app: &mut Self, _: &zwp_pointer_gesture_pinch_v1::ZwpPointerGesturePinchV1, event: zwp_pointer_gesture_pinch_v1::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        let msg = match event {
+            zwp_pointer_gesture_pinch_v1::Event::Begin { fingers, .. } => format!("begin {fingers}"),
+            zwp_pointer_gesture_pinch_v1::Event::Update { scale, .. } => format!("scale {scale:.1}"),
+            zwp_pointer_gesture_pinch_v1::Event::End { .. } => "end".to_string(),
+            _ => return,
+        };
+        let _ = app.tx.as_ref().unwrap().send(msg);
+    }
+}
+
+fn pinch_client(path: std::path::PathBuf, tx: mpsc::Sender<String>, stop: Arc<std::sync::atomic::AtomicBool>) {
+    let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
+    let (globals, mut queue) = registry_queue_init::<PinchApp>(&conn).unwrap();
+    let qh = queue.handle();
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=4, ()).unwrap();
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+    let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=1, ()).unwrap();
+    let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=1, ()).unwrap();
+    let gestures: zwp_pointer_gestures_v1::ZwpPointerGesturesV1 = globals.bind(&qh, 1..=3, ()).unwrap();
+    let mut app = PinchApp { tx: Some(tx.clone()), ..Default::default() };
+    let surface = compositor.create_surface(&qh, ());
+    let xs = wm.get_xdg_surface(&surface, &qh, ());
+    let _top = xs.get_toplevel(&qh, ());
+    surface.commit();
+    while !app.configured {
+        queue.blocking_dispatch(&mut app).unwrap();
+    }
+    let (w, h) = (300, 200);
+    let mut file = tempfile::tempfile_in(std::env::var("XDG_RUNTIME_DIR").unwrap()).unwrap();
+    file.write_all(&vec![0x80u8; (w * h * 4) as usize]).unwrap();
+    use std::os::fd::AsFd;
+    let pool = shm.create_pool(file.as_fd(), w * h * 4, &qh, ());
+    let buffer = pool.create_buffer(0, w, h, w * 4, wl_shm::Format::Argb8888, &qh, ());
+    surface.attach(Some(&buffer), 0, 0);
+    surface.commit();
+    let pointer = seat.get_pointer(&qh, ());
+    let _pinch = gestures.get_pinch_gesture(&pointer, &qh, ());
+    queue.roundtrip(&mut app).unwrap();
+    tx.send("ready".into()).unwrap();
+    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+        queue.blocking_dispatch(&mut app).ok();
+    }
+}
+
+#[test]
+fn a_three_finger_swipe_switches_workspaces_and_a_pinch_goes_to_the_program() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-gesture").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+
+    // three fingers: the fingers to the left bring the next workspace, to the right the previous
+    let swipe = |hn: &mut Harness, fingers: u32, dx: f64, dy: f64| {
+        hn.state.swipe_begin(fingers, 0);
+        for _ in 0..10 {
+            hn.state.swipe_update(dx / 10.0, dy / 10.0, 0);
+        }
+        hn.state.swipe_end(false, 0);
+    };
+    assert_eq!(hn.state.workspace, 0);
+    swipe(&mut hn, 3, -250.0, 10.0);
+    assert_eq!(hn.state.workspace, 1, "swiped to the next workspace");
+    swipe(&mut hn, 3, 250.0, 0.0);
+    assert_eq!(hn.state.workspace, 0, "and back");
+    swipe(&mut hn, 3, -40.0, 0.0);
+    swipe(&mut hn, 3, -150.0, 400.0);
+    swipe(&mut hn, 4, -300.0, 0.0);
+    assert_eq!(hn.state.workspace, 0, "short, vertical and four-finger swipes do not switch");
+
+    // a pinch over a window goes to its program
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (path, s2) = (dir.path().join("fde-e2e-gesture"), stop.clone());
+    std::thread::spawn(move || pinch_client(path, tx, s2));
+    let t0 = Instant::now();
+    while rx.try_recv().ok().as_deref() != Some("ready") {
+        hn.pump();
+        assert!(t0.elapsed() < Duration::from_secs(10), "no window");
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    hn.pump_for(50);
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    hn.state.pointer_moved((g.loc.x as f64 + 40.0, g.loc.y as f64 + 40.0).into(), 0);
+    hn.pump_for(30);
+    hn.state.pinch_begin(2, 1);
+    hn.state.pinch_update(0.0, 0.0, 1.5, 0.0, 2);
+    hn.state.pinch_end(false, 3);
+    let mut got = Vec::new();
+    let t0 = Instant::now();
+    while got.len() < 3 && t0.elapsed() < Duration::from_secs(5) {
+        hn.pump();
+        while let Ok(m) = rx.try_recv() {
+            got.push(m);
+        }
+        std::thread::sleep(Duration::from_millis(3));
+    }
+    assert_eq!(got, ["begin 2", "scale 1.5", "end"], "the program saw the pinch");
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+}

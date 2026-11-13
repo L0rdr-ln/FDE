@@ -57,6 +57,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+M", "bring back a minimized window"),
     ("Alt+1 .. 9", "go to a workspace (Shift: send the window there)"),
     ("Alt+Ctrl+Left / Right", "previous or next workspace"),
+    ("3-finger swipe", "next / previous workspace (touchpad)"),
     ("Windows key", "open the start menu"),
     ("Windows+Space", "next keyboard layout (input.keyboard_layout = \"us,de\")"),
     ("Alt+T", "tile the windows side by side (again: put them back)"),
@@ -210,6 +211,38 @@ impl Fde {
             InputEvent::PointerButton { event } => {
                 let pressed = event.state() == ButtonState::Pressed;
                 self.pointer_button(event.button_code(), pressed, Event::time_msec(&event));
+            }
+            InputEvent::GestureSwipeBegin { event } => {
+                use smithay::backend::input::GestureBeginEvent;
+                self.swipe_begin(event.fingers(), Event::time_msec(&event));
+            }
+            InputEvent::GestureSwipeUpdate { event } => {
+                use smithay::backend::input::GestureSwipeUpdateEvent;
+                self.swipe_update(event.delta_x(), event.delta_y(), Event::time_msec(&event));
+            }
+            InputEvent::GestureSwipeEnd { event } => {
+                use smithay::backend::input::GestureEndEvent;
+                self.swipe_end(event.cancelled(), Event::time_msec(&event));
+            }
+            InputEvent::GesturePinchBegin { event } => {
+                use smithay::backend::input::GestureBeginEvent;
+                self.pinch_begin(event.fingers(), Event::time_msec(&event));
+            }
+            InputEvent::GesturePinchUpdate { event } => {
+                use smithay::backend::input::GesturePinchUpdateEvent;
+                self.pinch_update(event.delta_x(), event.delta_y(), event.scale(), event.rotation(), Event::time_msec(&event));
+            }
+            InputEvent::GesturePinchEnd { event } => {
+                use smithay::backend::input::GestureEndEvent;
+                self.pinch_end(event.cancelled(), Event::time_msec(&event));
+            }
+            InputEvent::GestureHoldBegin { event } => {
+                use smithay::backend::input::GestureBeginEvent;
+                self.hold_begin(event.fingers(), Event::time_msec(&event));
+            }
+            InputEvent::GestureHoldEnd { event } => {
+                use smithay::backend::input::GestureEndEvent;
+                self.hold_end(event.cancelled(), Event::time_msec(&event));
             }
             InputEvent::PointerAxis { event } => {
                 let source = event.source();
