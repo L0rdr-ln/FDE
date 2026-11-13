@@ -32,6 +32,10 @@ enum Action {
     WindowMenu,
     Tile,
     NextLayout,
+    Volume(i32),
+    Mute,
+    Brightness(i32),
+    Media(&'static str),
     MenuKey(i32, bool, bool),
     CloseHelp,
     Restore,
@@ -58,6 +62,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+1 .. 9", "go to a workspace (Shift: send the window there)"),
     ("Alt+Ctrl+Left / Right", "previous or next workspace"),
     ("3-finger swipe", "next / previous workspace (touchpad)"),
+    ("Volume, brightness, media keys", "as on a laptop (brightness needs brightnessctl or logind)"),
     ("Windows key", "open the start menu"),
     ("Windows+Space", "next keyboard layout (input.keyboard_layout = \"us,de\")"),
     ("Alt+T", "tile the windows side by side (again: put them back)"),
@@ -81,7 +86,12 @@ pub fn edges_cursor(e: &Edges) -> &'static str {
 
 impl Fde {
     pub fn process_input_event<B: InputBackend>(&mut self, event: InputEvent<B>) {
+        // the first touch of a blacked-out screen only wakes it; nothing is clicked or typed
+        let was_off = self.screen_dim == 2;
         self.note_activity();
+        if was_off {
+            return;
+        }
         self.request_redraw();
         match event {
             InputEvent::Keyboard { event } => {
@@ -139,6 +149,24 @@ impl Fde {
                         }
                         if event.state() == KeyState::Pressed && mods.alt && sym == keysyms::KEY_space {
                             return FilterResult::Intercept(Action::WindowMenu);
+                        }
+                        // the keys of a laptop
+                        if event.state() == KeyState::Pressed {
+                            let key = match sym {
+                                keysyms::KEY_XF86AudioRaiseVolume => Some(Action::Volume(5)),
+                                keysyms::KEY_XF86AudioLowerVolume => Some(Action::Volume(-5)),
+                                keysyms::KEY_XF86AudioMute => Some(Action::Mute),
+                                keysyms::KEY_XF86MonBrightnessUp => Some(Action::Brightness(5)),
+                                keysyms::KEY_XF86MonBrightnessDown => Some(Action::Brightness(-5)),
+                                keysyms::KEY_XF86AudioPlay | keysyms::KEY_XF86AudioPause => Some(Action::Media("PlayPause")),
+                                keysyms::KEY_XF86AudioNext => Some(Action::Media("Next")),
+                                keysyms::KEY_XF86AudioPrev => Some(Action::Media("Previous")),
+                                keysyms::KEY_XF86AudioStop => Some(Action::Media("Stop")),
+                                _ => None,
+                            };
+                            if let Some(a) = key {
+                                return FilterResult::Intercept(a);
+                            }
                         }
                         if event.state() == KeyState::Pressed && handle.modified_sym().raw() == keysyms::KEY_Print {
                             return FilterResult::Intercept(Action::Screenshot);
@@ -304,6 +332,10 @@ impl Fde {
             Action::MenuKey(step, enter, escape) => self.window_menu_key(step, enter, escape),
             Action::Tile => self.toggle_tiling(),
             Action::NextLayout => self.next_layout(),
+            Action::Volume(d) => crate::hotkeys::volume(&self.hud_inbox, d),
+            Action::Mute => crate::hotkeys::mute(&self.hud_inbox),
+            Action::Brightness(p) => crate::hotkeys::brightness(&self.hud_inbox, p),
+            Action::Media(m) => crate::hotkeys::media(m),
             Action::CloseHelp => self.help_open = false,
             Action::Restore => self.restore_window(),
             Action::Lock => crate::shell::start_sibling("fde-lock"),

@@ -258,6 +258,7 @@ impl Fde {
         self.sync_foreign_toplevels();
         self.check_config(false);
         self.check_idle();
+        self.update_screen_dim();
         self.space.refresh();
         self.tick_animations();
 
@@ -629,6 +630,15 @@ impl Fde {
             let mut target = renderer.bind(scene)?;
             let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
             glass.mesh.draw_multiply(&mut frame, &tex, (size.w, size.h), &[(0.0, 0.0), (w, 0.0), (0.0, h), (w, h)], 2)?;
+            let _ = frame.finish()?;
+        }
+        // an idle screen: dimmed, or black
+        let dark = self.screen_dim_alpha();
+        if dark > 0.0 {
+            let full = Rectangle::<i32, Physical>::from_size(size);
+            let mut target = renderer.bind(scene)?;
+            let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+            frame.draw_solid(full, &[full], Color32F::new(0.0, 0.0, 0.0, dark))?;
             let _ = frame.finish()?;
         }
         Ok(())

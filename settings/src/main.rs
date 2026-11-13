@@ -483,13 +483,20 @@ fn shell_page(cfg: &Config, status: &Status) -> GBox {
 }
 
 fn session_page(cfg: &Config, status: &Status) -> GBox {
-    let (outer, body) = page("Session", "Lock the screen by itself when nobody uses the keyboard or mouse. 0 turns it off.");
-    let minutes = scale(0.0, 60.0, 1.0, (cfg.session.idle_lock_seconds / 60) as f64);
-    let (m2, s2) = (minutes.clone(), status.clone());
-    let save = debounced(move || s2.report(config::set(&path(), &model::session(m2.value() as u32))));
-    minutes.connect_value_changed(move |_| save());
-    body.append(&row("Lock after (minutes)", &minutes));
-    let key = Label::new(Some("Alt+L locks at any time."));
+    let (outer, body) = page("Session", "What happens when nobody uses the keyboard or mouse: the screen dims, goes black, and locks. 0 turns each off.");
+    let lock = scale(0.0, 60.0, 1.0, (cfg.session.idle_lock_seconds / 60) as f64);
+    let dim = scale(0.0, 60.0, 1.0, (cfg.session.dim_seconds / 60) as f64);
+    let off = scale(0.0, 60.0, 1.0, (cfg.session.screen_off_seconds / 60) as f64);
+    let (l2, d2, o2, s2) = (lock.clone(), dim.clone(), off.clone(), status.clone());
+    let save = debounced(move || s2.report(config::set(&path(), &model::session(l2.value() as u32, d2.value() as u32, o2.value() as u32))));
+    for sc in [&lock, &dim, &off] {
+        let s = save.clone();
+        sc.connect_value_changed(move |_| s());
+    }
+    body.append(&row("Dim after (minutes)", &dim));
+    body.append(&row("Screen off after (minutes)", &off));
+    body.append(&row("Lock after (minutes)", &lock));
+    let key = Label::new(Some("Alt+L locks at any time. A video or a program that keeps the screen awake stops dimming."));
     key.add_css_class("hint");
     key.set_halign(Align::Start);
     body.append(&key);

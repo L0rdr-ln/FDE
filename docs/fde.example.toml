@@ -40,6 +40,8 @@ autostart = []         # e.g. ["nm-applet", "foot"]
 [session]
 workspaces = 4         # virtual desktops, 1 .. 9
 idle_lock_seconds = 0  # lock after this many idle seconds; 0 = never
+dim_seconds = 300       # dim the screen after this many idle seconds; 0 = never (a video keeps it awake)
+screen_off_seconds = 600 # black out the screen after this many idle seconds; 0 = never
 
 # One block per monitor, named like the connector (see the log line "monitor DP-1 (...)").
 # Without a block a monitor uses its preferred mode at scale 1, placed to the right of the others.

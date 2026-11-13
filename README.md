@@ -99,6 +99,7 @@ Please attach the output of `fde --check` and `~/fde-last.log` to a report if so
 | **Windows+Space** | next keyboard layout, with several in `input.keyboard_layout = "us,de"` (or click it in the task bar) |
 | three-finger swipe left / right (touchpad) | next / previous workspace; pinch and other gestures go to the program |
 | **Windows key** | open the start menu |
+| volume, brightness and media keys | as on a laptop: a note shows the new volume or brightness (brightness needs `brightnessctl` or logind); the screen dims and goes black when idle (`[session]` in the config) |
 | **Alt+Tab** | the window switcher: hold Alt, press Tab to walk through the windows (most recent first, minimized ones too) as small pictures; Shift+Tab goes back; letting go of Alt picks one; Esc cancels |
 | **Alt+f**, **Alt+q** | maximize, close |
 | **Alt+L** | lock the session |

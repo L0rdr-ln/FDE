@@ -193,6 +193,10 @@ pub struct Fde {
     pub terminal: String,
     /// the last key or pointer event, for the idle lock
     pub last_activity: std::time::Instant,
+    /// 0 the screen is as usual, 1 dimmed, 2 blacked out (after the idle times of `[session]`)
+    pub screen_dim: u8,
+    /// what the key threads (volume, brightness) want shown on the screen
+    pub hud_inbox: crate::hotkeys::Inbox,
     idle_lock_started: bool,
     pub config: crate::config::Config,
     config_watcher: crate::config::Watcher,
@@ -403,6 +407,8 @@ impl Fde {
             cascade: 0,
             terminal: std::env::var("FDE_TERMINAL").unwrap_or_else(|_| config.shell.terminal.clone()),
             last_activity: std::time::Instant::now(),
+            screen_dim: 0,
+            hud_inbox: Default::default(),
             idle_lock_started: false,
             config,
             config_watcher: crate::config::Watcher::new(),
@@ -481,6 +487,50 @@ impl Fde {
     pub fn note_activity(&mut self) {
         self.last_activity = std::time::Instant::now();
         self.idle_lock_started = false;
+        if self.screen_dim != 0 {
+            self.screen_dim = 0;
+            self.request_redraw();
+        }
+    }
+
+    /// Dim or black out the screen when nobody has used it for the times in `[session]` (a
+    /// program that keeps the screen awake, a video, stops it). Returns true when it changed.
+    pub fn update_screen_dim(&mut self) -> bool {
+        let idle = self.last_activity.elapsed().as_secs();
+        let (dim, off) = (self.config.session.dim_seconds as u64, self.config.session.screen_off_seconds as u64);
+        let level = if self.idle_inhibited() {
+            0
+        } else if off > 0 && idle >= off {
+            2
+        } else if dim > 0 && idle >= dim {
+            1
+        } else {
+            0
+        };
+        if level == self.screen_dim {
+            return false;
+        }
+        self.screen_dim = level;
+        self.request_redraw();
+        tracing::info!("screen {}", ["back on", "dimmed", "off"][level as usize]);
+        true
+    }
+
+    /// How dark the picture is drawn: 0 normal, a part when dimmed, 1 when blacked out.
+    pub fn screen_dim_alpha(&self) -> f32 {
+        [0.0, 0.55, 1.0][self.screen_dim.min(2) as usize]
+    }
+
+    /// Messages from the key threads go on the screen; called by the loops of the backends.
+    pub fn poll_background(&mut self) {
+        let messages: Vec<String> = match self.hud_inbox.lock() {
+            Ok(mut v) => std::mem::take(&mut *v),
+            Err(_) => return,
+        };
+        if let Some(last) = messages.into_iter().last() {
+            self.hud = Some((std::time::Instant::now(), last));
+            self.request_redraw();
+        }
     }
 
     /// Lock the session once the user has been idle for `session.idle_lock_seconds` (0 = never).

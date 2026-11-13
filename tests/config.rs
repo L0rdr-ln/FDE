@@ -359,3 +359,42 @@ fn the_security_settings_have_safe_defaults() {
     let c = Config::parse("[security]\ntrusted_programs = []\n").unwrap();
     assert!(c.security.trusted_programs.is_empty());
 }
+
+#[test]
+fn an_idle_screen_dims_then_goes_black_and_any_activity_brings_it_back() {
+    use smithay::reexports::wayland_server::Display;
+    let display: Display<fde::state::Fde> = Display::new().unwrap();
+    let mut state = fde::state::Fde::new(&display.handle(), (800, 600).into());
+    state.config.session.dim_seconds = 60;
+    state.config.session.screen_off_seconds = 120;
+    let idle_for = |state: &mut fde::state::Fde, s: u64| state.last_activity = std::time::Instant::now() - std::time::Duration::from_secs(s);
+
+    assert!(!state.update_screen_dim() && state.screen_dim_alpha() == 0.0, "in use: nothing");
+    idle_for(&mut state, 61);
+    assert!(state.update_screen_dim() && state.screen_dim == 1, "dimmed after a minute");
+    assert!(state.screen_dim_alpha() > 0.3 && state.screen_dim_alpha() < 0.9);
+    assert!(!state.update_screen_dim(), "once");
+    idle_for(&mut state, 121);
+    assert!(state.update_screen_dim() && state.screen_dim == 2 && state.screen_dim_alpha() == 1.0, "black after two");
+    state.note_activity();
+    assert_eq!((state.screen_dim, state.screen_dim_alpha()), (0, 0.0), "any input brings it back");
+
+    // 0 turns each off
+    state.config.session.dim_seconds = 0;
+    state.config.session.screen_off_seconds = 0;
+    idle_for(&mut state, 100_000);
+    assert!(!state.update_screen_dim() && state.screen_dim == 0, "never");
+
+    // the key threads' messages reach the screen
+    state.hud_inbox.lock().unwrap().push("Volume: 45%".into());
+    state.poll_background();
+    assert_eq!(state.hud.as_ref().map(|h| h.1.as_str()), Some("Volume: 45%"));
+}
+
+#[test]
+fn the_idle_times_have_defaults_and_can_be_switched_off() {
+    let c = fde::config::Config::default();
+    assert_eq!((c.session.dim_seconds, c.session.screen_off_seconds), (300, 600));
+    let c = fde::config::Config::parse("[session]\ndim_seconds = 0\nscreen_off_seconds = 0\n").unwrap();
+    assert_eq!((c.session.dim_seconds, c.session.screen_off_seconds), (0, 0));
+}

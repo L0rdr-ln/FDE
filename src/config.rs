@@ -161,11 +161,15 @@ pub struct Session {
     pub idle_lock_seconds: u32,
     /// how many workspaces (virtual desktops), 1 .. 9
     pub workspaces: u32,
+    /// dim the screen after this many idle seconds; 0 = never
+    pub dim_seconds: u32,
+    /// black out the screen after this many idle seconds; 0 = never
+    pub screen_off_seconds: u32,
 }
 
 impl Default for Session {
     fn default() -> Self {
-        Session { idle_lock_seconds: 0, workspaces: 4 }
+        Session { idle_lock_seconds: 0, workspaces: 4, dim_seconds: 300, screen_off_seconds: 600 }
     }
 }
 

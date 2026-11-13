@@ -97,8 +97,13 @@ pub fn music(enabled: bool, path: &str, volume: f64, shuffle: bool) -> Vec<(&'st
     ]
 }
 
-pub fn session(idle_lock_minutes: u32) -> Vec<(&'static str, Setting)> {
-    vec![("session.idle_lock_seconds", Setting::Int(idle_lock_minutes as i64 * 60))]
+/// The idle times of the session, in minutes (0 = never): lock, dim, and black out the screen.
+pub fn session(idle_lock_minutes: u32, dim_minutes: u32, screen_off_minutes: u32) -> Vec<(&'static str, Setting)> {
+    vec![
+        ("session.idle_lock_seconds", Setting::Int(idle_lock_minutes as i64 * 60)),
+        ("session.dim_seconds", Setting::Int(dim_minutes as i64 * 60)),
+        ("session.screen_off_seconds", Setting::Int(screen_off_minutes as i64 * 60)),
+    ]
 }
 
 /// The programs trusted with screen capture, the window list, locking and overlays, from what
@@ -184,7 +189,7 @@ mod tests {
         set(&f, &appearance(&hex_color(1.0, 0.5, 0.0), 0.61234, 4, 0.5, false)).unwrap();
         set(&f, &keyboard(" de ", 30, 400)).unwrap();
         set(&f, &shell("alacritty", "", false, true)).unwrap();
-        set(&f, &session(10)).unwrap();
+        set(&f, &session(10, 3, 6)).unwrap();
         set(&f, &music(true, " /home/me/Music ", 0.456, true)).unwrap();
         set(&f, &wallpaper(" /tmp/a.png ", "tile")).unwrap();
         let c = Config::parse(&std::fs::read_to_string(&f).unwrap()).unwrap();
@@ -193,6 +198,7 @@ mod tests {
         assert_eq!((c.input.keyboard_layout.as_str(), c.input.repeat_rate, c.input.repeat_delay), ("de", 30, 400));
         assert_eq!((c.shell.terminal.as_str(), c.shell.panel), ("alacritty", false));
         assert_eq!(c.session.idle_lock_seconds, 600);
+        assert_eq!((c.session.dim_seconds, c.session.screen_off_seconds), (180, 360));
         assert_eq!((c.music.enabled, c.music.path.as_str(), c.music.volume, c.music.shuffle), (true, "/home/me/Music", 0.46, true));
         assert!(set(&f, &music(true, "", 1.5, false)).is_err(), "a volume above 1 is refused");
         assert_eq!((c.wallpaper.path.as_str(), c.wallpaper.mode.as_str()), ("/tmp/a.png", "tile"));

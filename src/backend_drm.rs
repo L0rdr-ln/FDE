@@ -432,6 +432,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         event_loop.dispatch(Some(Duration::from_millis(16)), &mut state)?;
         // send what this round produced (key presses, pointer motion) to the programs now
         let _ = state.display_handle.flush_clients();
+        state.poll_background();
         if crate::kblayout::take_request() {
             state.next_layout();
         }
