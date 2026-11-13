@@ -600,6 +600,22 @@ impl Fde {
             && p.y >= out_rect.loc.y as f64
             && p.x < (out_rect.loc.x + out_rect.size.w) as f64
             && p.y < (out_rect.loc.y + out_rect.size.h) as f64;
+        // what is being dragged, under the pointer
+        if let (Some(icon), true) = (self.dnd_icon.clone(), on_this) {
+            if smithay::utils::IsAlive::alive(&icon) {
+                let pos = (sc((p.x - view.origin.x as f64) as i32, view.scale), sc((p.y - view.origin.y as f64) as i32, view.scale));
+                let elements: Vec<WaylandSurfaceRenderElement<GlesRenderer>> =
+                    render_elements_from_surface_tree(renderer, &icon, pos, view.scale, 0.9, Kind::Unspecified);
+                let full = Rectangle::<i32, Physical>::from_size(size);
+                let mut target = renderer.bind(scene)?;
+                let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+                draw_render_elements(&mut frame, view.scale, &elements, &[full])?;
+                let _ = frame.finish()?;
+                drop(target);
+                let elapsed = self.start_time.elapsed();
+                smithay::desktop::utils::send_frames_surface_tree(&icon, output, elapsed, Some(std::time::Duration::ZERO), |_, _| Some(output.clone()));
+            }
+        }
         if self.draw_cursor && on_this {
             self.draw_cursor_on(renderer, scene, size, view)?;
         }

@@ -134,6 +134,8 @@ pub struct Fde {
     pub help_open: bool,
     /// the window menu (right click on a title bar, Alt+Space), while it is open
     pub window_menu: Option<crate::winmenu::WindowMenu>,
+    /// the picture a program shows under the pointer while something is dragged
+    pub dnd_icon: Option<smithay::reexports::wayland_server::protocol::wl_surface::WlSurface>,
     /// tells XWayland which X11 window has the keyboard
     pub xfocus: Option<crate::xfocus::XFocus>,
     /// the open menu of a program that holds the keyboard and pointer
@@ -360,6 +362,7 @@ impl Fde {
             redraw_serial: 1,
             help_open: false,
             window_menu: None,
+            dnd_icon: None,
             xfocus: None,
             popup_grab: None,
             tiled_before: None,

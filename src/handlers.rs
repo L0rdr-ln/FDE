@@ -155,7 +155,18 @@ impl DataDeviceHandler for Fde {
         &self.data_device_state
     }
 }
-impl ClientDndGrabHandler for Fde {}
+// a drag between (or inside) programs: show the picture it brings along under the pointer
+impl ClientDndGrabHandler for Fde {
+    fn started(&mut self, _source: Option<smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource>, icon: Option<WlSurface>, _seat: Seat<Self>) {
+        self.dnd_icon = icon;
+        self.request_redraw();
+    }
+
+    fn dropped(&mut self, _target: Option<WlSurface>, _validated: bool, _seat: Seat<Self>) {
+        self.dnd_icon = None;
+        self.request_redraw();
+    }
+}
 impl ServerDndGrabHandler for Fde {
     fn send(&mut self, _mime_type: String, _fd: OwnedFd, _seat: Seat<Self>) {}
 }

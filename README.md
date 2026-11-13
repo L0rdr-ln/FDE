@@ -27,7 +27,7 @@ the client. Clients can ask for the same blur behind their own translucent areas
 
 | | |
 |---|---|
-| **Compositor** | xdg-shell windows with server-side glass frames, move / resize / maximize / minimize, wobbly windows (spring-bent while dragged), fullscreen, pointer lock for games, XWayland (X11 programs get the same glass frames), screen capture (wlr-screencopy), clipboard and primary selection (middle-click paste) between Wayland and X11 programs, fractional scaling, dmabuf, idle inhibit, focus, popups, keyboard and pointer; layer-shell (panels, launchers, wallpapers) with exclusive zones; `ext-background-effect-v1`; `ext-session-lock-v1`; `wlr-foreign-toplevel-management`; nested (winit) backend and a DRM/KMS backend |
+| **Compositor** | xdg-shell windows with server-side glass frames, move / resize / maximize / minimize, wobbly windows (spring-bent while dragged), fullscreen, pointer lock for games, XWayland (X11 programs get the same glass frames), screen capture (wlr-screencopy), clipboard and primary selection (middle-click paste) between Wayland and X11 programs, drag and drop (with the dragged picture under the pointer), fractional scaling, dmabuf, idle inhibit, focus, popups, keyboard and pointer; layer-shell (panels, launchers, wallpapers) with exclusive zones; `ext-background-effect-v1`; `ext-session-lock-v1`; `wlr-foreign-toplevel-management`; nested (winit) backend and a DRM/KMS backend |
 | **Cursors** | the mouse cursor comes from your XCursor theme (`appearance.cursor_theme`/`cursor_size`, or `$XCURSOR_THEME`), at the monitor's scale; clients can ask for named cursors (text beam, hand ...) or draw their own; resize arrows on window borders. The nested window uses the host's cursor |
 | **Task bar** `fde-panel` | glass strip with the start orb, a button per open window of the workspace being shown (click to raise or minimize), workspace dots, volume and battery, clock; blurred behind |
 | **Start menu** | the installed applications from `.desktop` files with a search field: type to filter, Up/Down, Enter starts, Esc clears or closes; glass sheet, closes when the pointer leaves; a power row at the bottom: Lock, Log out, Sleep, Restart, Shut down (the last three ask twice) |
@@ -54,7 +54,7 @@ everything is sharp.
 
 ![FDE at scale 2 (nested)](docs/hidpi.png)
 
-**Not verified:** nothing has run on real hardware. That covers the DRM/KMS backend (real console / GPU, so multi-monitor output and hot-plug on real GPUs), GPU buffer import (dmabuf), sound output, the screen-sharing portal, the polkit prompt and logging in from a display manager. Everything else is tested with software GL and real Wayland/X11 clients. Not done: GTK/Qt apps asking for blur, touch and tablet input, input methods, turning displays off when idle.
+**Not verified:** nothing has run on real hardware. That covers the DRM/KMS backend (real console / GPU, so multi-monitor output and hot-plug on real GPUs), GPU buffer import (dmabuf), sound output, the screen-sharing portal, the polkit prompt and logging in from a display manager. Everything else is tested with software GL and real Wayland/X11 clients. Not done: GTK/Qt apps asking for blur, touch and tablet input, input methods, turning displays off when idle, drag and drop between an X11 and a Wayland program (Wayland to Wayland and X11 to X11 work; Smithay has no XDND bridge yet).
 See [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Try it

@@ -4289,3 +4289,141 @@ fn a_dialog_opens_over_its_window_and_is_not_remembered_in_its_place() {
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
     std::env::remove_var("XDG_STATE_HOME");
 }
+
+// ------------------------------------------------------------------ drag and drop
+
+
+#[derive(Default)]
+struct DragApp {
+    configured: bool,
+    seat: Option<wl_seat::WlSeat>,
+    device: Option<wl_data_device::WlDataDevice>,
+    source: Option<wl_data_source::WlDataSource>,
+    origin: Option<wl_surface::WlSurface>,
+    icon: Option<wl_surface::WlSurface>,
+    tx: Option<mpsc::Sender<&'static str>>,
+}
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for DragApp {
+    fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+}
+delegate_noop!(DragApp: ignore wl_compositor::WlCompositor);
+delegate_noop!(DragApp: ignore wl_surface::WlSurface);
+delegate_noop!(DragApp: ignore wl_shm::WlShm);
+delegate_noop!(DragApp: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(DragApp: ignore wl_buffer::WlBuffer);
+delegate_noop!(DragApp: ignore wl_seat::WlSeat);
+delegate_noop!(DragApp: ignore xdg_toplevel::XdgToplevel);
+delegate_noop!(DragApp: ignore wl_data_device_manager::WlDataDeviceManager);
+delegate_noop!(DragApp: ignore wl_data_source::WlDataSource);
+impl Dispatch<wl_data_device::WlDataDevice, ()> for DragApp {
+    fn event(_: &mut Self, _: &wl_data_device::WlDataDevice, _: wl_data_device::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {}
+    wayland_client::event_created_child!(DragApp, wl_data_device::WlDataDevice, [
+        wl_data_device::EVT_DATA_OFFER_OPCODE => (wayland_client::protocol::wl_data_offer::WlDataOffer, ()),
+    ]);
+}
+delegate_noop!(DragApp: ignore wayland_client::protocol::wl_data_offer::WlDataOffer);
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for DragApp {
+    fn event(_: &mut Self, wm: &xdg_wm_base::XdgWmBase, event: xdg_wm_base::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm.pong(serial);
+        }
+    }
+}
+impl Dispatch<xdg_surface::XdgSurface, ()> for DragApp {
+    fn event(app: &mut Self, s: &xdg_surface::XdgSurface, event: xdg_surface::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            s.ack_configure(serial);
+            app.configured = true;
+        }
+    }
+}
+impl Dispatch<wl_pointer::WlPointer, ()> for DragApp {
+    fn event(app: &mut Self, _: &wl_pointer::WlPointer, event: wl_pointer::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        // a press starts dragging some text, with a picture of it
+        if let wl_pointer::Event::Button { serial, state: wayland_client::WEnum::Value(wl_pointer::ButtonState::Pressed), .. } = event {
+            app.device.as_ref().unwrap().start_drag(app.source.as_ref(), app.origin.as_ref().unwrap(), app.icon.as_ref(), serial);
+            let _ = app.tx.as_ref().unwrap().send("dragging");
+        }
+    }
+}
+
+fn drag_client(path: std::path::PathBuf, tx: mpsc::Sender<&'static str>, stop: Arc<std::sync::atomic::AtomicBool>) {
+    let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
+    let (globals, mut queue) = registry_queue_init::<DragApp>(&conn).unwrap();
+    let qh = queue.handle();
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=4, ()).unwrap();
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+    let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=1, ()).unwrap();
+    let seat: wl_seat::WlSeat = globals.bind(&qh, 1..=1, ()).unwrap();
+    let ddm: wl_data_device_manager::WlDataDeviceManager = globals.bind(&qh, 1..=3, ()).unwrap();
+    let mut app = DragApp { tx: Some(tx.clone()), ..Default::default() };
+    let surface = compositor.create_surface(&qh, ());
+    let xs = wm.get_xdg_surface(&surface, &qh, ());
+    let _top = xs.get_toplevel(&qh, ());
+    surface.commit();
+    while !app.configured {
+        queue.blocking_dispatch(&mut app).unwrap();
+    }
+    let buf = |w: i32, h: i32| {
+        let mut file = tempfile::tempfile_in(std::env::var("XDG_RUNTIME_DIR").unwrap()).unwrap();
+        file.write_all(&vec![0xffu8; (w * h * 4) as usize]).unwrap();
+        use std::os::fd::AsFd;
+        let pool = shm.create_pool(file.as_fd(), w * h * 4, &qh, ());
+        pool.create_buffer(0, w, h, w * 4, wl_shm::Format::Argb8888, &qh, ())
+    };
+    surface.attach(Some(&buf(300, 200)), 0, 0);
+    surface.commit();
+    let icon = compositor.create_surface(&qh, ());
+    icon.attach(Some(&buf(40, 20)), 0, 0);
+    let source = ddm.create_data_source(&qh, ());
+    source.offer("text/plain".into());
+    app.device = Some(ddm.get_data_device(&seat, &qh, ()));
+    let _pointer = seat.get_pointer(&qh, ());
+    app.seat = Some(seat);
+    app.source = Some(source);
+    app.origin = Some(surface);
+    app.icon = Some(icon);
+    queue.roundtrip(&mut app).unwrap();
+    tx.send("ready").unwrap();
+    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+        queue.blocking_dispatch(&mut app).ok();
+    }
+}
+
+#[test]
+fn a_drag_shows_its_picture_under_the_pointer_until_the_drop() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-drag").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (path, s2) = (dir.path().join("fde-e2e-drag"), stop.clone());
+    std::thread::spawn(move || drag_client(path, tx, s2));
+    let wait = |hn: &mut Harness, want: &str| {
+        let t0 = Instant::now();
+        while rx.try_recv().ok() != Some(want) {
+            hn.pump();
+            assert!(t0.elapsed() < Duration::from_secs(10), "no {want}");
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        hn.pump_for(50);
+    };
+    wait(&mut hn, "ready");
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    hn.state.pointer_moved((g.loc.x as f64 + 50.0, g.loc.y as f64 + 50.0).into(), 0);
+    hn.pump_for(30);
+    hn.state.pointer_button(0x110, true, 1);
+    wait(&mut hn, "dragging");
+    assert!(hn.state.dnd_icon.is_some(), "the drag's picture is shown");
+    hn.state.pointer_moved((g.loc.x as f64 + 120.0, g.loc.y as f64 + 90.0).into(), 2);
+    hn.state.pointer_button(0x110, false, 3);
+    hn.pump_for(50);
+    assert!(hn.state.dnd_icon.is_none(), "and gone after the drop");
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+}
