@@ -17,11 +17,11 @@ Kawase blur), draws the glass panel over it (rounded shape, tint, gloss, light e
 the client. Clients can ask for the same blur behind their own translucent areas with
 `ext-background-effect-v1`.
 
-![FDE with two windows, the task bar and its window list](docs/shell.png)
+![FDE with a Qt editor and an X11 terminal in glass frames, the task bar with its window list, network status and workspaces](docs/shell.png)
 
-| start menu | lock screen | notifications |
-|---|---|---|
-| ![start menu](docs/menu.png) | ![lock screen](docs/lock.png) | ![notifications](docs/notify.png) |
+| start menu (Windows key) | window menu (right-click a title bar) | lock screen | notifications |
+|---|---|---|---|
+| ![start menu](docs/menu.png) | ![window menu](docs/window-menu.png) | ![lock screen](docs/lock.png) | ![notifications](docs/notify.png) |
 
 ## What works
 
