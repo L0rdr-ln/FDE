@@ -327,6 +327,17 @@ impl Fde {
         }
     }
 
+    /// The window a dialog belongs to (Wayland: xdg_toplevel.set_parent; X11: WM_TRANSIENT_FOR).
+    pub fn parent_window(&self, window: &Window) -> Option<Window> {
+        if let Some(top) = window.toplevel() {
+            let parent = top.parent()?;
+            return self.window_for_surface(&parent);
+        }
+        let x = window.x11_surface()?;
+        let id = x.is_transient_for()?;
+        self.space.elements().find(|w| w.x11_surface().is_some_and(|s| s.window_id() == id)).cloned()
+    }
+
     /// A new window has drawn its first picture: if it hangs over the edge of the usable area
     /// from where it was cascaded, move it in (to the top left corner if it is bigger than all).
     pub fn fit_new_window(&mut self, window: &Window) {
@@ -341,9 +352,18 @@ impl Fde {
         if self.is_maximized(window) || self.is_fullscreen(window) || self.is_override_redirect(window) {
             return;
         }
-        let area = self.usable_area(&self.output_for_window(window));
         let style = self.frame_style(window);
-        let outer = outer_rect(g, &style);
+        let mut outer = outer_rect(g, &style);
+        // a dialog opens in the middle of its window
+        let parent = self.parent_window(window).and_then(|p| self.outer_of(&p).map(|o| (p, o)));
+        if let Some((_, po)) = &parent {
+            outer.loc = (po.loc.x + (po.size.w - outer.size.w) / 2, po.loc.y + (po.size.h - outer.size.h) / 2).into();
+        }
+        let area = match &parent {
+            Some((p, _)) => self.usable_area(&self.output_for_window(p)),
+            None => self.usable_area(&self.output_for_window(window)),
+        };
+        let cascaded = outer_rect(g, &style).loc;
         let fit = |pos: i32, len: i32, start: i32, room: i32| -> i32 { pos.min(start + room - len).max(start) };
         let x = fit(outer.loc.x, outer.size.w, area.loc.x, area.size.w);
         let y = fit(outer.loc.y, outer.size.h, area.loc.y, area.size.h);
@@ -355,8 +375,8 @@ impl Fde {
                 top.send_pending_configure();
             }
         }
-        if (x, y) != (outer.loc.x, outer.loc.y) {
-            let loc = g.loc + Point::from((x - outer.loc.x, y - outer.loc.y));
+        if (x, y) != (cascaded.x, cascaded.y) {
+            let loc = g.loc + Point::from((x - cascaded.x, y - cascaded.y));
             self.space.map_element(window.clone(), loc, false);
             if let Some(x11) = window.x11_surface() {
                 let _ = x11.configure(Some(Rectangle::new(loc, g.size)));

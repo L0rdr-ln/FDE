@@ -4136,3 +4136,141 @@ fn a_new_window_too_big_for_where_it_opens_is_moved_onto_the_screen() {
     let outer = hn.state.outer_of(&win).unwrap();
     assert!(area.contains_rect(outer), "{outer:?} fits in {area:?}");
 }
+
+// ------------------------------------------------------------------ dialogs
+
+#[derive(Default)]
+struct DlgApp {
+    configured: [bool; 2],
+    closed: [bool; 2],
+}
+impl Dispatch<wl_registry::WlRegistry, GlobalListContents> for DlgApp {
+    fn event(_: &mut Self, _: &wl_registry::WlRegistry, _: wl_registry::Event, _: &GlobalListContents, _: &Connection, _: &QueueHandle<Self>) {}
+}
+delegate_noop!(DlgApp: ignore wl_compositor::WlCompositor);
+delegate_noop!(DlgApp: ignore wl_surface::WlSurface);
+delegate_noop!(DlgApp: ignore wl_shm::WlShm);
+delegate_noop!(DlgApp: ignore wl_shm_pool::WlShmPool);
+delegate_noop!(DlgApp: ignore wl_buffer::WlBuffer);
+delegate_noop!(DlgApp: ignore zxdg_decoration_manager_v1::ZxdgDecorationManagerV1);
+delegate_noop!(DlgApp: ignore zxdg_toplevel_decoration_v1::ZxdgToplevelDecorationV1);
+impl Dispatch<xdg_wm_base::XdgWmBase, ()> for DlgApp {
+    fn event(_: &mut Self, wm: &xdg_wm_base::XdgWmBase, event: xdg_wm_base::Event, _: &(), _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_wm_base::Event::Ping { serial } = event {
+            wm.pong(serial);
+        }
+    }
+}
+impl Dispatch<xdg_surface::XdgSurface, usize> for DlgApp {
+    fn event(app: &mut Self, s: &xdg_surface::XdgSurface, event: xdg_surface::Event, i: &usize, _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_surface::Event::Configure { serial } = event {
+            s.ack_configure(serial);
+            app.configured[*i] = true;
+        }
+    }
+}
+impl Dispatch<xdg_toplevel::XdgToplevel, usize> for DlgApp {
+    fn event(app: &mut Self, _: &xdg_toplevel::XdgToplevel, event: xdg_toplevel::Event, i: &usize, _: &Connection, _: &QueueHandle<Self>) {
+        if let xdg_toplevel::Event::Close = event {
+            app.closed[*i] = true;
+        }
+    }
+}
+
+/// A main window (400 x 300) and, once it shows, a dialog of it (200 x 100), both named
+/// "org.example.Dialogs". The dialog goes away when asked to close; reports "main", "dialog", "dialog closed".
+fn dialog_client(path: std::path::PathBuf, tx: mpsc::Sender<&'static str>, stop: Arc<std::sync::atomic::AtomicBool>) {
+    let conn = Connection::from_socket(UnixStream::connect(path).unwrap()).unwrap();
+    let (globals, mut queue) = registry_queue_init::<DlgApp>(&conn).unwrap();
+    let qh = queue.handle();
+    let compositor: wl_compositor::WlCompositor = globals.bind(&qh, 4..=4, ()).unwrap();
+    let shm: wl_shm::WlShm = globals.bind(&qh, 1..=1, ()).unwrap();
+    let wm: xdg_wm_base::XdgWmBase = globals.bind(&qh, 1..=1, ()).unwrap();
+    let deco: zxdg_decoration_manager_v1::ZxdgDecorationManagerV1 = globals.bind(&qh, 1..=1, ()).unwrap();
+    let mut app = DlgApp::default();
+    let show = |i: usize, w: i32, h: i32, parent: Option<&xdg_toplevel::XdgToplevel>, app: &mut DlgApp, queue: &mut wayland_client::EventQueue<DlgApp>| {
+        let surface = compositor.create_surface(&qh, ());
+        let xs = wm.get_xdg_surface(&surface, &qh, i);
+        let top = xs.get_toplevel(&qh, i);
+        top.set_app_id("org.example.Dialogs".into());
+        top.set_parent(parent);
+        let d = deco.get_toplevel_decoration(&top, &qh, ());
+        surface.commit();
+        while !app.configured[i] {
+            queue.blocking_dispatch(app).unwrap();
+        }
+        let mut file = tempfile::tempfile_in(std::env::var("XDG_RUNTIME_DIR").unwrap()).unwrap();
+        file.write_all(&vec![0x90u8; (w * h * 4) as usize]).unwrap();
+        use std::os::fd::AsFd;
+        let pool = shm.create_pool(file.as_fd(), w * h * 4, &qh, ());
+        let buffer = pool.create_buffer(0, w, h, w * 4, wl_shm::Format::Argb8888, &qh, ());
+        surface.attach(Some(&buffer), 0, 0);
+        surface.commit();
+        queue.roundtrip(app).unwrap();
+        (surface, xs, top, d)
+    };
+    let main = show(0, 400, 300, None, &mut app, &mut queue);
+    tx.send("main").unwrap();
+    let dialog = show(1, 200, 100, Some(&main.2), &mut app, &mut queue);
+    tx.send("dialog").unwrap();
+    let mut dialog = Some(dialog);
+    while !stop.load(std::sync::atomic::Ordering::SeqCst) {
+        queue.blocking_dispatch(&mut app).ok();
+        if app.closed[1] {
+            if let Some((surface, xs, top, d)) = dialog.take() {
+                d.destroy();
+                top.destroy();
+                xs.destroy();
+                surface.destroy();
+                queue.roundtrip(&mut app).ok();
+                tx.send("dialog closed").ok();
+            }
+        }
+    }
+}
+
+#[test]
+fn a_dialog_opens_over_its_window_and_is_not_remembered_in_its_place() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    std::env::set_var("XDG_STATE_HOME", dir.path().join("state"));
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-dialog").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let (tx, rx) = mpsc::channel();
+    let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let (path, s2) = (dir.path().join("fde-e2e-dialog"), stop.clone());
+    std::thread::spawn(move || dialog_client(path, tx, s2));
+    let wait = |hn: &mut Harness, want: &str| {
+        let t0 = Instant::now();
+        loop {
+            hn.pump();
+            if rx.try_recv().ok() == Some(want) {
+                break;
+            }
+            assert!(t0.elapsed() < Duration::from_secs(10), "no {want}");
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        hn.pump_for(50);
+    };
+    wait(&mut hn, "main");
+    let main = hn.state.space.elements().next().cloned().unwrap();
+    wait(&mut hn, "dialog");
+    let dialog = hn.state.space.elements().find(|w| **w != main).cloned().unwrap();
+    assert_eq!(hn.state.parent_window(&dialog), Some(main.clone()));
+    let (mo, d) = (hn.state.outer_of(&main).unwrap(), hn.state.outer_of(&dialog).unwrap());
+    let centre = |r: Rectangle<i32, smithay::utils::Logical>| (r.loc.x + r.size.w / 2, r.loc.y + r.size.h / 2);
+    let (a, b) = (centre(mo), centre(d));
+    assert!((a.0 - b.0).abs() <= 1 && (a.1 - b.1).abs() <= 1, "the dialog {d:?} sits in the middle of its window {mo:?}");
+
+    // closing the dialog leaves the main window's remembered place alone
+    hn.state.close_window(&dialog);
+    wait(&mut hn, "dialog closed");
+    let file = std::fs::read_to_string(dir.path().join("state/fde/windows")).unwrap_or_default();
+    assert!(!file.contains("\t200\t100\t"), "the dialog's size was not saved as the program's: {file:?}");
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
+    std::env::remove_var("XDG_STATE_HOME");
+}

@@ -103,7 +103,8 @@ impl Fde {
     /// A window is about to close: remember where it was (its normal place if it is maximized
     /// or snapped; nothing if it is full screen or not on the screen).
     pub fn remember_placement(&mut self, window: &Window) {
-        if !self.config.shell.remember_windows || self.is_fullscreen(window) {
+        // dialogs share the program's name with its main window: they are not remembered
+        if !self.config.shell.remember_windows || self.is_fullscreen(window) || self.parent_window(window).is_some() {
             return;
         }
         let Some(id) = app_id(window) else { return };
@@ -132,7 +133,7 @@ impl Fde {
     /// A window is about to be shown for the first time: put it where this program's
     /// window was last, if that is still on a monitor. True if it was placed.
     pub fn restore_placement(&mut self, window: &Window) -> bool {
-        if !self.config.shell.remember_windows {
+        if !self.config.shell.remember_windows || self.parent_window(window).is_some() {
             return false;
         }
         let Some(id) = app_id(window) else { return false };
