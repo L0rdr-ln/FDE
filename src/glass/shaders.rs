@@ -194,7 +194,7 @@ void main() {
                     float lit = clamp(1.0 - length(lp) * 0.85, 0.0, 1.0);
                     vec3 body = mix(c * 0.62, c, smoothstep(0.0, 0.55, lit));
                     body = mix(body, mix(c, vec3(1.0), 0.55), smoothstep(0.55, 1.0, lit));
-                    body = mix(body, vec3(0.5), 1.0 - focus * 0.85);   // dimmed when the window is not focused
+                    body = mix(body, vec3(0.5), (1.0 - focus) * 0.45);   // a little dimmed when the window is not focused
                     float glint = smoothstep(0.0, 1.0, 1.0 - length((o - vec2(0.0, -r * 0.42)) / vec2(r * 0.72, r * 0.42)));
                     body = mix(body, vec3(1.0), glint * 0.75 * (0.3 + 0.7 * reflections));
                     float orb_rim = smoothstep(1.2, 0.0, abs(od + 0.5));

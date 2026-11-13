@@ -13,7 +13,7 @@ the user file wins per key). One file, sectioned, with comments kept when the ap
 [appearance]
 theme = "aero"            # a theme directory: colours, gloss, orb colours, fonts
 accent = "#4aa8ee"
-transparency = 0.38       # glass tint strength
+transparency = 0.46       # glass tint strength
 blur = 3                  # blur levels (0 turns blur off: battery / weak GPUs)
 animations = true
 

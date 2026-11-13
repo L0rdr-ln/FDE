@@ -73,7 +73,7 @@ impl Default for GlassStyle {
     fn default() -> Self {
         GlassStyle {
             radius: 12.0,
-            border: 5.0,
+            border: 8.0,
             titlebar: 32.0,
             tint_frame: [0.29, 0.66, 0.93, 0.38],
             tint_client: [0.85, 0.93, 1.0, 0.10],
@@ -201,9 +201,9 @@ impl Glass {
                 Uniform::new("size", (area.size.w as f32, area.size.h as f32)),
                 Uniform::new("spread", spread as f32),
                 Uniform::new("radius", style.radius.max(style.radius_bottom)),
-                Uniform::new("shift_y", 7.0 * scale),
-                Uniform::new("soft", 20.0 * scale),
-                Uniform::new("strength", (0.22 + 0.22 * style.focus) * style.shadow),
+                Uniform::new("shift_y", 10.0 * scale),
+                Uniform::new("soft", 22.0 * scale),
+                Uniform::new("strength", (0.34 + 0.30 * style.focus) * style.shadow),
             ],
         )
     }

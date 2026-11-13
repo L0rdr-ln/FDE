@@ -1,11 +1,11 @@
 name = "Frutiger Aero"
 description = "Glossy blue glass, round orbs, a sky and a green hill."
 accent = "#4aa8ee"
-transparency = 0.38
+transparency = 0.46
 blur = 3
 gloss = 0.8
 radius = 12
-border = 5
+border = 8
 titlebar = 32
 client_tint = [0.85, 0.93, 1.0, 0.10]
 highlight = 0.9

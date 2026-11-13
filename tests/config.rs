@@ -24,7 +24,7 @@ fn the_config_file_is_read_reloaded_and_a_bad_edit_is_ignored() {
     std::fs::write(&file, "[appearance]\naccent = \"#0000ff\"\nblur = 5\n[shell]\nterminal = \"alacritty\"\n[input]\nrepeat_rate = 40\n").unwrap();
     state.check_config(true);
     assert_eq!(state.style.tint_frame[..3], [0.0, 0.0, 1.0], "the accent follows");
-    assert_eq!(state.style.tint_frame[3], 0.38, "keys that are gone go back to their default");
+    assert_eq!(state.style.tint_frame[3], 0.46, "keys that are gone go back to their default");
     assert_eq!(state.style.blur_levels, 5);
     assert_eq!(state.terminal, "alacritty");
     assert_eq!(state.config.input.repeat_rate, 40);

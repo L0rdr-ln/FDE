@@ -5,7 +5,7 @@
 theme = "aero"         # aero, frutiger-metro, eco, dorific, vector-flourish, aqua, or a file in ~/.config/fde/themes/NAME.toml (see docs/THEMES.md)
 # accent, transparency, blur and gloss below override the theme's own values; leave them out to get the theme's
 accent = "#4aa8ee"     # colour of the glass, #rrggbb
-transparency = 0.38    # tint strength of window frames, 0 (clear) .. 1
+transparency = 0.46    # tint strength of window frames, 0 (clear) .. 1
 blur = 3               # blur levels 1..6: softer but slower
 gloss = 0.8            # gloss band on the title bar, 0 .. 1
 performance = "auto"   # auto: "fast" when the graphics are software-drawn (a VM without 3D); "quality" or "fast" (one blur pass, no shadows, no wobble)

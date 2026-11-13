@@ -968,7 +968,7 @@ fn a_window_on_the_second_monitor_is_drawn_there_and_the_pointer_and_maximize_fo
     let g = hn.state.space.element_geometry(&win).unwrap();
     let area = hn.state.usable_area(&second);
     assert!(g.loc.x >= 800 && g.loc.x + g.size.w <= 1600, "inside the second monitor: {g:?}");
-    assert_eq!((g.loc.x, g.loc.y), (area.loc.x + 5, area.loc.y + 5 + 32), "at the top left of that monitor's usable area, inside its frame: {g:?} {area:?}");
+    assert_eq!((g.loc.x, g.loc.y), (area.loc.x + hn.state.style.border as i32, area.loc.y + (hn.state.style.border + hn.state.style.titlebar) as i32), "at the top left of that monitor's usable area, inside its frame: {g:?} {area:?}");
 }
 
 #[test]

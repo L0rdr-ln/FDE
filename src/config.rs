@@ -36,7 +36,7 @@ pub struct Appearance {
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.38, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
+        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.46, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
     }
 }
 
