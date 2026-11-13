@@ -192,26 +192,29 @@ pub fn draw(text: &mut TextRenderer, s: i32, notes: &[&Note]) -> Vec<u8> {
                 let t = y as f32 / bubble_h as f32;
                 let idx = (((y0 + y) * w + x) * 4) as usize;
                 let px = &mut buf[idx..idx + 4];
-                // the dark glass of the task bar (red for critical ones), a sheen, a light rim
-                let base = if note.critical { [0.62, 0.16, 0.10] } else { pal.dark(0.45 + 0.15 * t) };
-                blend(px, base, (0.84 + 0.14 * pal.solid) * cover);
+                // the light glass of the task bar and the windows (a red tint for critical ones), a
+                // sheen, a bright rim with a thin shade inside it
+                let base = if note.critical { [0.98, 0.58, 0.52 - 0.1 * t] } else { pal.light(0.42 + 0.18 * (1.0 - t)) };
+                blend(px, base, (0.88 + 0.06 * t + 0.06 * pal.solid) * cover);
                 if t < 0.4 {
-                    blend(px, [1.0, 1.0, 1.0], 0.14 * (1.0 - t / 0.4) * cover * pal.shine);
+                    blend(px, [1.0, 1.0, 1.0], 0.30 * (1.0 - t / 0.4) * cover * pal.shine.max(0.25));
                 }
                 if d > -1.5 * sf {
-                    blend(px, [1.0, 1.0, 1.0], 0.5 * cover);
+                    blend(px, [1.0, 1.0, 1.0], 0.85 * cover);
                 } else if d > -2.5 * sf {
-                    blend(px, [0.0, 0.0, 0.0], 0.25 * cover);
+                    blend(px, pal.dark(0.5), 0.28 * cover);
                 }
             }
         }
-        if let Some(img) = text.line(&note.summary, w - 32 * s, 15.0 * sf, [255, 255, 255], pal.glow(0.9), 2 * s) {
+        let ink = if note.critical { [95, 12, 6] } else { pal.ink };
+        let soft = [(ink[0] as u32 * 3 / 4 + 40) as u8, (ink[1] as u32 * 3 / 4 + 45) as u8, (ink[2] as u32 * 3 / 4 + 55) as u8];
+        if let Some(img) = text.line(&note.summary, w - 32 * s, 15.0 * sf, ink, Some(([255, 255, 255], 0.9)), 2 * s) {
             blit(&mut buf, w, h, &img, 16 * s, y0 + 12 * s);
         }
         // the message: on two lines when there are no buttons below it
         let lines = if note.buttons().is_empty() { wrap(text, &note.body, w - 32 * s, 13.0 * sf, 2) } else { vec![note.body.clone()] };
         for (li, line) in lines.iter().enumerate() {
-            if let Some(img) = text.line(line, w - 32 * s, 13.0 * sf, [225, 238, 252], Some(([0, 0, 0], 0.5)), 2 * s) {
+            if let Some(img) = text.line(line, w - 32 * s, 13.0 * sf, soft, Some(([255, 255, 255], 0.8)), 2 * s) {
                 blit(&mut buf, w, h, &img, 16 * s, y0 + (38 + 18 * li as i32) * s);
             }
         }
@@ -228,14 +231,16 @@ pub fn draw(text: &mut TextRenderer, s: i32, notes: &[&Note]) -> Vec<u8> {
                     let cover = (0.5 - d).clamp(0.0, 1.0);
                     if cover > 0.0 {
                         let idx = ((y * w + x) * 4) as usize;
-                        blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.28 * cover);
+                        blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.45 * cover);
                         if d > -1.2 * sf {
-                            blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.5 * cover);
+                            blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.85 * cover);
+                        } else if d > -2.2 * sf {
+                            blend(&mut buf[idx..idx + 4], pal.dark(0.55), 0.22 * cover);
                         }
                     }
                 }
             }
-            if let Some(img) = text.line(label, bx1 - bx0 - 8 * s, 12.0 * sf, [255, 255, 255], pal.glow(0.8), s) {
+            if let Some(img) = text.line(label, bx1 - bx0 - 8 * s, 12.0 * sf, ink, Some(([255, 255, 255], 0.8)), s) {
                 blit(&mut buf, w, h, &img, bx0 + (bx1 - bx0 - img.width) / 2, by0 + (by1 - by0 - img.height) / 2);
             }
         }

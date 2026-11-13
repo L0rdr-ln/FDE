@@ -648,8 +648,8 @@ impl Fde {
         let mut lines: Vec<(GlesTexture, Rectangle<i32, Physical>)> = Vec::new();
         for (i, item) in menu.items.iter().enumerate() {
             let row = view.rect(Rectangle::new((menu.at.x + PAD, menu.at.y + PAD + i as i32 * ROW_H).into(), (crate::winmenu::WIDTH - 2 * PAD, ROW_H).into()));
-            let color = if matches!(item, crate::winmenu::MenuItem::Close) { [255, 210, 200] } else { [255, 255, 255] };
-            if let Some(img) = self.text.line(&item.label(), row.size.w - sc(16, view.scale), 13.0 * view.scale as f32, color, Some(([8, 40, 90], 0.8)), sc(2, view.scale)) {
+            let color = if matches!(item, crate::winmenu::MenuItem::Close) { [150, 25, 15] } else { crate::theme::palette().ink };
+            if let Some(img) = self.text.line(&item.label(), row.size.w - sc(16, view.scale), 13.0 * view.scale as f32, color, Some(([255, 255, 255], 0.8)), sc(2, view.scale)) {
                 let tex = renderer.import_memory(&img.rgba, Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((img.width, img.height)), false)?;
                 let dest = Rectangle::new((row.loc.x + sc(10, view.scale), row.loc.y + (row.size.h - img.height) / 2).into(), (img.width, img.height).into());
                 lines.push((tex, dest));
@@ -661,12 +661,13 @@ impl Fde {
         // a soft shadow, the sheet, a light top edge
         let shadow = Rectangle::<i32, Physical>::new((sheet.loc.x + sc(3, view.scale), sheet.loc.y + sc(4, view.scale)).into(), sheet.size);
         frame.draw_solid(full, &[shadow], Color32F::new(0.0, 0.0, 0.0, 0.25))?;
-        frame.draw_solid(full, &[sheet], Color32F::new(0.06, 0.2, 0.4, 0.92))?;
+        // the light glass of the task bar and the windows (premultiplied)
+        frame.draw_solid(full, &[sheet], Color32F::new(0.70, 0.82, 0.92, 0.94))?;
         let edge = Rectangle::<i32, Physical>::new(sheet.loc, (sheet.size.w, sc(1, view.scale).max(1)).into());
-        frame.draw_solid(full, &[edge], Color32F::new(0.7, 0.88, 1.0, 0.8))?;
+        frame.draw_solid(full, &[edge], Color32F::new(0.95, 0.98, 1.0, 0.95))?;
         if let Some(h) = menu.hover {
             let lit = view.rect(Rectangle::new((menu.at.x + PAD / 2, menu.at.y + PAD + h as i32 * ROW_H).into(), (crate::winmenu::WIDTH - PAD, ROW_H).into()));
-            frame.draw_solid(full, &[lit], Color32F::new(0.45, 0.75, 1.0, 0.45))?;
+            frame.draw_solid(full, &[lit], Color32F::new(0.22, 0.34, 0.50, 0.52))?; // premultiplied: a blue at half strength
         }
         for (tex, dest) in &lines {
             let src = Rectangle::<f64, BufferCoord>::from_size((tex.size().w as f64, tex.size().h as f64).into());

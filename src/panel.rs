@@ -403,15 +403,16 @@ pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String],
             let t = y as f32 / h as f32;
             let i = ((y * w + x) * 4) as usize;
             let px = &mut buf[i..i + 4];
-            // the same dark glass as the task bar, with a sheen at the top and a light rim
-            blend(px, pal.dark(0.42 + 0.2 * t), (0.80 + 0.17 * pal.solid) * cover);
+            // the same light glass as the task bar and the window frames: a sheen at the top, a
+            // bright rim with a thin shade inside it
+            blend(px, pal.light(0.42 + 0.18 * (1.0 - t)), (0.82 + 0.08 * t + 0.10 * pal.solid) * cover);
             if t < 0.2 {
-                blend(px, [1.0, 1.0, 1.0], 0.14 * (1.0 - t * 5.0) * cover * pal.shine);
+                blend(px, [1.0, 1.0, 1.0], 0.30 * (1.0 - t * 5.0) * cover * pal.shine.max(0.25));
             }
             if d > -1.5 * sf {
-                blend(px, [1.0, 1.0, 1.0], 0.50 * cover);
+                blend(px, [1.0, 1.0, 1.0], 0.85 * cover);
             } else if d > -2.5 * sf {
-                blend(px, [0.0, 0.0, 0.0], 0.25 * cover);
+                blend(px, pal.dark(0.5), 0.28 * cover);
             }
         }
     }
@@ -498,7 +499,7 @@ pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String],
         let ly = (mh - POWER_H) * s;
         for x in MENU_PAD * s..w - MENU_PAD * s {
             let idx = ((ly * w + x) * 4) as usize;
-            blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.35);
+            blend(&mut buf[idx..idx + 4], pal.dark(0.5), 0.30);
         }
         for (i, action) in crate::power::ACTIONS.iter().enumerate() {
             let (x0, y0, x1, y1) = power_rect(i);
@@ -518,24 +519,26 @@ pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String],
                     let t = (y - y0) as f32 / (y1 - y0) as f32;
                     let idx = ((y * w + x) * 4) as usize;
                     let (base, a) = if armed {
-                        ([0.85, 0.22, 0.18], 0.85 - 0.15 * t)
+                        ([0.85, 0.22, 0.18], 0.90 - 0.15 * t)
                     } else if hot {
-                        (pal.light(0.6), 0.6 - 0.2 * t)
+                        (pal.light(0.2), 0.75 - 0.2 * t)
                     } else {
-                        (pal.light(0.2), 0.3 - 0.1 * t)
+                        ([1.0, 1.0, 1.0], 0.40 - 0.16 * t)
                     };
                     blend(&mut buf[idx..idx + 4], base, a * cover);
                     if t < 0.45 {
-                        blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.12 * cover * pal.shine);
+                        blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.20 * (1.0 - t / 0.45) * cover * pal.shine.max(0.25));
                     }
                     if d > -1.2 * sf {
-                        blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.4 * cover);
+                        blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.85 * cover);
+                    } else if d > -2.2 * sf {
+                        blend(&mut buf[idx..idx + 4], pal.dark(0.55), 0.22 * cover);
                     }
                 }
             }
             let label = if armed { "Sure?" } else { action.label };
-            let color = if hot && !armed { [10, 50, 100] } else { [255, 255, 255] };
-            let glow = if hot && !armed { None } else { pal.glow(0.7) };
+            let color = if armed { [255, 255, 255] } else { pal.ink };
+            let glow = if armed { Some(([90, 10, 5], 0.6)) } else { Some(([255, 255, 255], 0.8)) };
             if let Some(img) = text.line(label, x1 - x0, 11.0 * sf, color, glow, s) {
                 blit(&mut buf, w, h, &img, x0 + (x1 - x0 - img.width) / 2, y0 + (y1 - y0 - img.height) / 2);
             }

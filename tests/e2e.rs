@@ -731,7 +731,7 @@ fn a_notification_sent_over_dbus_appears_as_a_bubble_and_goes_away() {
         hn.pump();
         hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
         let now = pixel(&grab(&mut renderer, &mut scene), w, w - 12 - 170, 12 + 70);
-        if (now[0] - before[0]).abs() + (now[1] - before[1]).abs() > 30 {
+        if (now[0] - before[0]).abs() + (now[1] - before[1]).abs() + (now[2] - before[2]).abs() > 12 {
             shown = true;
             break;
         }
@@ -746,7 +746,7 @@ fn a_notification_sent_over_dbus_appears_as_a_bubble_and_goes_away() {
         hn.pump();
         hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
         let now = pixel(&grab(&mut renderer, &mut scene), w, w - 12 - 170, 12 + 70);
-        if (now[0] - before[0]).abs() + (now[1] - before[1]).abs() < 6 {
+        if (now[0] - before[0]).abs() + (now[1] - before[1]).abs() + (now[2] - before[2]).abs() < 6 {
             gone = true;
             break;
         }
@@ -3718,7 +3718,7 @@ fn right_clicking_a_title_bar_opens_the_window_menu_and_its_rows_work() {
     let (mx, my) = (r.loc.x + r.size.w - 6, r.loc.y + r.size.h - 4);
     assert_ne!(pixel(&before, 800, mx, my), pixel(&after, 800, mx, my));
     let px = pixel(&after, 800, mx, my);
-    assert!(px[2] > px[0] + 30, "the menu's dark blue glass is drawn: {px:?}");
+    assert!(px[2] > px[0] + 15 && px[0] > 120, "the menu's light blue glass is drawn: {px:?}");
 
     // the row under the pointer lights up; clicking it chooses it
     let row_y = |i: usize| (r.loc.y + fde::winmenu::PAD + i as i32 * fde::winmenu::ROW_H + fde::winmenu::ROW_H / 2) as f64;
