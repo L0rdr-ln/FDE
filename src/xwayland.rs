@@ -45,6 +45,10 @@ pub fn start(handle: LoopHandle<'static, Fde>, dh: &DisplayHandle) {
                 state.xwm = Some(wm);
                 state.loop_handle = Some(h2.clone());
                 state.x11_display = Some(display_number);
+                state.xfocus = crate::xfocus::XFocus::connect(display_number);
+                if state.xfocus.is_none() {
+                    tracing::warn!("cannot connect to XWayland for the keyboard focus: X11 programs may not get typing");
+                }
                 std::env::set_var("DISPLAY", format!(":{display_number}"));
             }
             Err(e) => tracing::warn!("XWayland window manager: {e}"),

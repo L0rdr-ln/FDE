@@ -141,6 +141,13 @@ impl Fde {
         if let Some(x) = window.x11_surface() {
             let _ = x.set_activated(true);
         }
+        // the X server must know too
+        if let Some(xf) = self.xfocus.as_mut() {
+            match window.x11_surface() {
+                Some(x) => xf.focus(x.window_id()),
+                None => xf.unfocus(),
+            }
+        }
         if let Some(surface) = window.wl_surface().map(|s| s.into_owned()) {
             let serial = SERIAL_COUNTER.next_serial();
             if let Some(kb) = self.seat.get_keyboard() {

@@ -43,4 +43,5 @@ pub mod windows;
 pub mod winmenu;
 pub mod workspaces;
 pub mod wobble;
+pub mod xfocus;
 pub mod xwayland;

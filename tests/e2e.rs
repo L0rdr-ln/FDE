@@ -1883,6 +1883,21 @@ fn an_x11_program_gets_a_managed_window_that_can_be_closed() {
     assert!(state.outer_of(&win).unwrap().loc.y < g.loc.y, "it has a frame above the client area");
     let surface = win.wl_surface().unwrap().into_owned();
     assert_eq!(state.seat.get_keyboard().unwrap().current_focus(), Some(surface), "it has the keyboard");
+    // and the X server knows it too (programs like Qt ignore typing otherwise)
+    {
+        use x11rb::protocol::xproto::ConnectionExt;
+        let (conn, _) = x11rb::connect(Some(&format!(":{n}"))).expect("connect to XWayland");
+        let t0 = Instant::now();
+        let id = win.x11_surface().unwrap().window_id();
+        loop {
+            let focus = conn.get_input_focus().unwrap().reply().unwrap().focus;
+            if focus == id {
+                break;
+            }
+            assert!(t0.elapsed() < Duration::from_secs(5), "X input focus is {focus:#x}, not the window {id:#x}");
+            step(&mut state, &mut display, &mut ev);
+        }
+    }
 
     // it is drawn with the glass frame
     if let Ok(mut renderer) = offscreen_renderer() {
