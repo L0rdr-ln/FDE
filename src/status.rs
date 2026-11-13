@@ -184,6 +184,56 @@ pub fn open_network_settings(terminal: &str) {
     let _ = Command::new(terminal).args(["-e", "nmtui"]).spawn();
 }
 
+/// (busy, total) CPU time counters from the first line of `/proc/stat`.
+pub fn parse_cpu(stat: &str) -> Option<(u64, u64)> {
+    let line = stat.lines().next()?;
+    let f: Vec<u64> = line.strip_prefix("cpu")?.split_whitespace().take(8).filter_map(|v| v.parse().ok()).collect();
+    if f.len() < 4 {
+        return None;
+    }
+    let total: u64 = f.iter().sum();
+    let idle = f[3] + f.get(4).copied().unwrap_or(0);
+    Some((total.saturating_sub(idle), total))
+}
+
+/// How busy the CPU was between two readings, in percent.
+pub fn cpu_between(before: (u64, u64), now: (u64, u64)) -> u32 {
+    let total = now.1.saturating_sub(before.1);
+    if total == 0 {
+        return 0;
+    }
+    ((now.0.saturating_sub(before.0)) * 100 / total).min(100) as u32
+}
+
+/// The CPU load since the last call (the first call has nothing to compare with).
+pub fn cpu() -> Option<u32> {
+    static LAST: std::sync::Mutex<Option<(u64, u64)>> = std::sync::Mutex::new(None);
+    let now = parse_cpu(&std::fs::read_to_string("/proc/stat").ok()?)?;
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    let out = last.map(|before| cpu_between(before, now));
+    *last = Some(now);
+    out
+}
+
+/// Memory in use in percent, from `/proc/meminfo` (what is not available).
+pub fn parse_meminfo(text: &str) -> Option<u32> {
+    let get = |key: &str| text.lines().find_map(|l| l.strip_prefix(key)?.trim().strip_suffix("kB")?.trim().parse::<u64>().ok());
+    let (total, avail) = (get("MemTotal:")?, get("MemAvailable:")?);
+    (total > 0).then(|| (total.saturating_sub(avail) * 100 / total) as u32)
+}
+
+pub fn memory() -> Option<u32> {
+    parse_meminfo(&std::fs::read_to_string("/proc/meminfo").ok()?)
+}
+
+pub fn cpu_label(p: u32) -> String {
+    format!("CPU {p}%")
+}
+
+pub fn memory_label(p: u32) -> String {
+    format!("RAM {p}%")
+}
+
 /// What a status label looks like.
 pub fn volume_label(v: Volume) -> String {
     if v.muted {
@@ -242,6 +292,17 @@ mod tests {
         assert_eq!(network_label(&Network::Offline), "Offline");
         assert_eq!(parse_nmcli_ssid("no:Neighbour\nyes:Home\n"), Some("Home".into()));
         assert_eq!(parse_nmcli_ssid("no:Neighbour\n"), None);
+    }
+
+    #[test]
+    fn cpu_and_memory_come_from_proc() {
+        let before = parse_cpu("cpu  100 0 100 700 100 0 0 0 0 0\ncpu0 1 2 3\n").unwrap();
+        assert_eq!(before, (200, 1000));
+        let now = parse_cpu("cpu  200 0 200 750 150 0 0 0 0 0\n").unwrap();
+        assert_eq!(cpu_between(before, now), 66, "200 busy ticks of 300");
+        assert_eq!(parse_meminfo("MemTotal:       16000000 kB\nMemFree: 1 kB\nMemAvailable:    4000000 kB\n"), Some(75));
+        assert_eq!(parse_meminfo("nothing"), None);
+        assert_eq!((cpu_label(7), memory_label(41)), ("CPU 7%".to_string(), "RAM 41%".to_string()));
     }
 
     #[test]

@@ -2,7 +2,6 @@
 //! by its app id, kept in `$XDG_STATE_HOME/fde/windows` (`~/.local/state/fde/windows`).
 //! `shell.remember_windows = false` turns it off.
 
-use std::collections::HashMap;
 use std::path::PathBuf;
 
 use smithay::desktop::Window;

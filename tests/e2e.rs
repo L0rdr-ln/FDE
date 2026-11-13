@@ -481,10 +481,11 @@ fn the_real_task_bar_shows_a_button_for_an_open_window() {
         let m = renderer.copy_framebuffer(&target, Rectangle::from_size(size), Fourcc::Abgr8888).unwrap();
         renderer.map_texture(&m).unwrap().to_vec()
     };
-    let probe = |bytes: &[u8]| (pixel(bytes, w, 100, 592), pixel(bytes, w, 450, 592));
+    let probe = |bytes: &[u8]| (pixel(bytes, w, 66, 592), pixel(bytes, w, 450, 592));
     hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
     let (on_button, beside) = probe(&grab(&mut renderer, &mut scene));
-    assert!((on_button[0] - beside[0]).abs() < 6, "no task button yet: {on_button:?} {beside:?}");
+    let apart = |a: [i32; 3], b: [i32; 3]| (a[0] - b[0]).abs() + (a[1] - b[1]).abs() + (a[2] - b[2]).abs();
+    assert!(apart(on_button, beside) < 6, "no task button yet: {on_button:?} {beside:?}");
 
     // open a window: a button for it appears in the bar
     let (tx, rx) = mpsc::channel();
@@ -497,7 +498,7 @@ fn the_real_task_bar_shows_a_button_for_an_open_window() {
         let _ = rx.try_recv();
         hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
         let (on_button, beside) = probe(&grab(&mut renderer, &mut scene));
-        if (on_button[0] - beside[0]).abs() > 12 {
+        if apart(on_button, beside) > 12 {
             appeared = true;
             break;
         }
@@ -1253,7 +1254,7 @@ fn minimizing_shrinks_into_the_task_bar_button_and_restoring_brings_it_back() {
     let target = hn.state.minimize_target(&win).unwrap();
     let _ = panel.kill();
     let _ = panel.wait();
-    assert!(target.loc.y >= 560 && target.loc.y + target.size.h <= 600 && target.size.w > 50, "the button is in the bar at the bottom: {target:?}");
+    assert!(target.loc.y >= 560 && target.loc.y + target.size.h <= 600 && target.size.w > 30, "the button is in the bar at the bottom: {target:?}");
 
     let g = hn.state.space.element_geometry(&win).unwrap();
     let (cx, cy) = (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2);

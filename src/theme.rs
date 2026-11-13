@@ -244,6 +244,8 @@ pub struct Palette {
     /// 1 for solid themes, 0 for see-through glass
     pub solid: f32,
     pub orb: [f32; 3],
+    /// the dark ink of titles on the glass (the task bar writes in it too)
+    pub ink: [u8; 3],
 }
 
 impl Default for Palette {
@@ -270,6 +272,10 @@ impl Palette {
             shine: (gloss / 0.8).clamp(0.0, 1.0),
             solid: if t.transparency >= 0.95 { 1.0 } else { 0.0 },
             orb,
+            ink: {
+                let k = crate::config::parse_color(&t.title_ink).unwrap_or([0.02, 0.14, 0.24]);
+                [(k[0] * 255.0) as u8, (k[1] * 255.0) as u8, (k[2] * 255.0) as u8]
+            },
         }
     }
 

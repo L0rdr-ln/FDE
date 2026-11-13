@@ -326,8 +326,9 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, u8> for App {
 }
 
 fn clock() -> String {
+    // the time, and under it the day and date
     Command::new("date")
-        .arg("+%H:%M")
+        .arg("+%H:%M\n%a %-d %b")
         .output()
         .ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
@@ -533,6 +534,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match kind {
                 panel::StatusKind::Volume => fde::status::toggle_mute(),
                 panel::StatusKind::DoNotDisturb => fde::notify::set_dnd(false),
+                panel::StatusKind::Cpu | panel::StatusKind::Memory => {}
                 panel::StatusKind::Network => fde::status::open_network_settings(&terminal()),
                 panel::StatusKind::KeyboardLayout => fde::kblayout::request_next(),
                 panel::StatusKind::Battery => {}
@@ -551,6 +553,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             if let Some(v) = fde::status::volume() {
                 status_now.push((panel::StatusKind::Volume, fde::status::volume_label(v)));
+            }
+            if let Some(p) = fde::status::cpu() {
+                status_now.push((panel::StatusKind::Cpu, fde::status::cpu_label(p)));
+            }
+            if let Some(p) = fde::status::memory() {
+                status_now.push((panel::StatusKind::Memory, fde::status::memory_label(p)));
             }
             status_now.push((panel::StatusKind::Network, fde::status::network_label(&fde::status::network())));
             if let Some(b) = fde::status::battery() {

@@ -8,11 +8,11 @@ pub const HEIGHT: i32 = 40;
 pub const ORB_SIZE: i32 = 32;
 pub const ORB_MARGIN: i32 = 6;
 
-/// Is the point on the start orb?
+/// Is the point on the start button (a rounded square)?
 pub fn on_orb(x: f64, y: f64, height: i32) -> bool {
     let (cx, cy) = orb_center(height);
     let r = ORB_SIZE as f64 / 2.0;
-    (x - cx).powi(2) + (y - cy).powi(2) <= r * r
+    (x - cx).abs() <= r && (y - cy).abs() <= r
 }
 
 /// One window in the task list.
@@ -26,17 +26,16 @@ pub struct Task {
 }
 
 /// Size of the icons on the task buttons (logical pixels).
-pub const TASK_ICON: i32 = 22;
+pub const TASK_ICON: i32 = 24;
 
 const TASKS_LEFT: i32 = ORB_MARGIN * 2 + ORB_SIZE + 6;
 const TASK_GAP: i32 = 4;
-const TASK_MAX_W: i32 = 190;
+const TASK_MAX_W: i32 = 46;
 const CLOCK_ROOM: i32 = 90;
 
-/// The x range and the y range of task button `i` of `n` in a panel `width` wide.
-/// Room at the right end of the bar for the clock, workspace dots and status labels (logical
-/// pixels): set each time the status labels are drawn, so the window buttons stop before them.
-/// (The task bar draws on one thread.)
+// Room at the right end of the bar for the clock, workspace dots and status labels (logical
+// pixels): set each time the status labels are drawn, so the window buttons stop before them.
+// (The task bar draws on one thread.)
 thread_local! {
     static RIGHT_ROOM: std::cell::Cell<i32> = const { std::cell::Cell::new(CLOCK_ROOM) };
 }
@@ -45,6 +44,7 @@ pub fn right_room() -> i32 {
     RIGHT_ROOM.with(|r| r.get())
 }
 
+/// The x range and the y range of task button `i` of `n` in a panel `width` wide.
 pub fn task_rect(i: usize, n: usize, width: i32, height: i32) -> (i32, i32, i32, i32) {
     let avail = (width - TASKS_LEFT - right_room()).max(0);
     let w = ((avail - TASK_GAP * (n as i32 - 1).max(0)) / n.max(1) as i32).clamp(0, TASK_MAX_W);
@@ -101,87 +101,91 @@ pub fn draw(text: &mut TextRenderer, width: i32, height: i32, s: i32, hover: boo
     let pal = crate::theme::palette();
     for y in 0..height {
         let t = y as f32 / (height - 1).max(1) as f32;
-        // dark tinted glass (the accent deep down), a sheen over the upper part, and a crisp
-        // light edge on top with a dark line under it, like the Aero task bar
-        let base = pal.dark(0.50 + 0.18 * t);
-        let alpha = 0.74 + 0.08 * t + 0.18 * pal.solid;
+        // the glass of the window frames: the accent lifted toward white, a sheen over the upper
+        // half, a bright edge on top with a thin shade under it
+        let base = pal.light(0.42 + 0.18 * (1.0 - t));
+        let alpha = 0.82 + 0.08 * t + 0.10 * pal.solid;
         for x in 0..width {
             let i = ((y * width + x) * 4) as usize;
             let px = &mut buf[i..i + 4];
             blend(px, base, alpha);
-            if t < 0.48 {
-                blend(px, [1.0, 1.0, 1.0], 0.13 * (1.0 - t / 0.48) * pal.shine + 0.03);
+            if t < 0.5 {
+                blend(px, [1.0, 1.0, 1.0], 0.34 * (1.0 - t / 0.5) * pal.shine.max(0.25));
             }
             if y < s {
-                blend(px, [1.0, 1.0, 1.0], 0.55 * pal.shine.max(0.4));
+                blend(px, [1.0, 1.0, 1.0], 0.85);
             } else if y < 2 * s {
-                blend(px, [0.0, 0.0, 0.0], 0.30);
+                blend(px, pal.dark(0.5), 0.28);
             }
         }
     }
-    // the start orb: a glossy sphere lit from the upper left, a soft light bouncing up from
-    // below, a bright highlight and a dark outline, with four bubbles on it
-    let (cx, cy) = orb_center(height / s);
-    let (cx, cy) = (cx as f32 * sf, cy as f32 * sf);
-    let r = ORB_SIZE as f32 / 2.0 * sf;
-    for y in 0..height {
-        for x in 0..(ORB_SIZE + 2 * ORB_MARGIN) * s {
-            let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
-            let d = (dx * dx + dy * dy).sqrt();
-            let cover = (r + 0.5 - d).clamp(0.0, 1.0); // antialiased edge
-            if cover <= 0.0 {
-                continue;
-            }
-            let (nx, ny) = (dx / r, dy / r);
-            let lit = (1.0 - ((nx + 0.30).powi(2) + (ny + 0.40).powi(2)).sqrt() * 0.8).clamp(0.0, 1.0);
-            let k = 0.50 + 0.70 * lit + if hover { 0.14 } else { 0.0 };
-            let body = [(pal.orb[0] * k).min(1.0), (pal.orb[1] * k).min(1.0), (pal.orb[2] * k).min(1.0)];
-            let i = ((y * width + x) * 4) as usize;
-            let px = &mut buf[i..i + 4];
-            blend(px, body, cover);
-            // light bouncing up from below
-            let bounce = ((ny - 0.45) / 0.55).clamp(0.0, 1.0) * (1.0 - nx.abs()).max(0.0) * 0.35;
-            blend(px, [0.9, 1.0, 0.8], bounce * cover);
-            // the specular highlight
-            let (hx, hy) = (nx / 0.70, (ny + 0.50) / 0.34);
-            let h = (1.0 - (hx * hx + hy * hy).sqrt()).clamp(0.0, 1.0);
-            blend(px, [1.0, 1.0, 1.0], (h * h * (3.0 - 2.0 * h)) * 0.85 * pal.shine.max(0.4) * cover);
-            // outline: dark outside, a light line just inside
-            if d > r - 1.3 * sf {
-                blend(px, [0.0, 0.08, 0.04], 0.55 * cover);
-            } else if d > r - 2.6 * sf {
-                blend(px, [1.0, 1.0, 1.0], 0.30 * cover);
-            }
-        }
-    }
-    // four small bubbles in a square: the FDE mark
-    for (bx, by) in [(-0.27f32, -0.27f32), (0.27, -0.27), (-0.27, 0.27), (0.27, 0.27)] {
-        let (bcx, bcy, br) = (cx + bx * r, cy + by * r + 0.02 * r, 0.17 * r);
-        for y in (bcy - br - 2.0) as i32..(bcy + br + 2.0) as i32 {
-            for x in (bcx - br - 2.0) as i32..(bcx + br + 2.0) as i32 {
-                if x < 0 || y < 0 || x >= width || y >= height {
+    // the start button: a glass rounded square with the FDE mark (four coloured bubbles)
+    {
+        let (cx, cy) = orb_center(height / s);
+        let (cx, cy) = (cx as f32 * sf, cy as f32 * sf);
+        let r = ORB_SIZE as f32 / 2.0 * sf;
+        let rad = 9.0 * sf;
+        for y in 0..height {
+            for x in 0..(ORB_SIZE + 2 * ORB_MARGIN) * s {
+                let (dx, dy) = (x as f32 + 0.5 - cx, y as f32 + 0.5 - cy);
+                let (qx, qy) = (dx.abs() - (r - rad), dy.abs() - (r - rad));
+                let d = qx.max(0.0).hypot(qy.max(0.0)) + qx.max(qy).min(0.0) - rad;
+                let cover = (0.5 - d).clamp(0.0, 1.0);
+                if cover <= 0.0 {
                     continue;
                 }
-                let d = ((x as f32 + 0.5 - bcx).powi(2) + (y as f32 + 0.5 - bcy).powi(2)).sqrt();
-                let cover = (br + 0.5 - d).clamp(0.0, 1.0);
-                if cover > 0.0 {
-                    let i = ((y * width + x) * 4) as usize;
-                    blend(&mut buf[i..i + 4], [1.0, 1.0, 1.0], 0.92 * cover);
+                let t = ((dy + r) / (2.0 * r)).clamp(0.0, 1.0);
+                let i = ((y * width + x) * 4) as usize;
+                let px = &mut buf[i..i + 4];
+                // pale glass, a little bluer toward the bottom
+                let k = if hover { 0.10 } else { 0.0 };
+                blend(px, [0.95 - 0.16 * t + k, 0.98 - 0.10 * t + k, 1.0], 0.97 * cover);
+                if t < 0.5 {
+                    blend(px, [1.0, 1.0, 1.0], 0.55 * (1.0 - t / 0.5) * cover);
+                }
+                // outline: dark outside, light inside
+                if d > -1.3 * sf {
+                    blend(px, pal.dark(0.65), 0.75 * cover);
+                } else if d > -2.5 * sf {
+                    blend(px, [1.0, 1.0, 1.0], 0.65 * cover);
+                }
+            }
+        }
+        // the mark
+        let colors = [[0.95, 0.33, 0.20], [0.30, 0.72, 0.25], [0.20, 0.55, 0.92], [0.98, 0.76, 0.12]];
+        for (n, (bx, by)) in [(-0.27f32, -0.27f32), (0.27, -0.27), (-0.27, 0.27), (0.27, 0.27)].into_iter().enumerate() {
+            let (bcx, bcy, br) = (cx + bx * r, cy + by * r, 0.20 * r);
+            for y in (bcy - br - 2.0) as i32..(bcy + br + 2.0) as i32 {
+                for x in (bcx - br - 2.0) as i32..(bcx + br + 2.0) as i32 {
+                    if x < 0 || y < 0 || x >= width || y >= height {
+                        continue;
+                    }
+                    let (ddx, ddy) = (x as f32 + 0.5 - bcx, y as f32 + 0.5 - bcy);
+                    let d = (ddx * ddx + ddy * ddy).sqrt();
+                    let cover = (br + 0.5 - d).clamp(0.0, 1.0);
+                    if cover > 0.0 {
+                        let i = ((y * width + x) * 4) as usize;
+                        let lit = (1.0 - (((ddx + 0.3 * br) / br).powi(2) + ((ddy + 0.4 * br) / br).powi(2)).sqrt() * 0.7).clamp(0.0, 1.0);
+                        let c = colors[n];
+                        let shade = 0.78 + 0.35 * lit;
+                        blend(&mut buf[i..i + 4], [(c[0] * shade).min(1.0), (c[1] * shade).min(1.0), (c[2] * shade).min(1.0)], cover);
+                    }
                 }
             }
         }
     }
-    // the task buttons: a glass pill each, brighter for the active window, dim when minimized
+    // the task buttons: a glass tile each with only the program's icon (a letter without one);
+    // the active window's is lit from below, a minimized one is faint
+    let ink = pal.ink;
     for (i, task) in tasks.iter().enumerate() {
         let (lx0, lx1, ly0, ly1) = task_rect(i, tasks.len(), width / s, height / s);
         if lx1 - lx0 < 24 {
             continue;
         }
         let (x0, x1, y0, y1) = (lx0 * s, lx1 * s, ly0 * s, ly1 * s);
-        let rad = 6.0f32 * sf;
+        let rad = 7.0f32 * sf;
         for y in y0..y1 {
             for x in x0..x1 {
-                // rounded rectangle coverage
                 let dx = (x as f32 + 0.5 - (x0 + x1) as f32 / 2.0).abs() - ((x1 - x0) as f32 / 2.0 - rad);
                 let dy = (y as f32 + 0.5 - (y0 + y1) as f32 / 2.0).abs() - ((y1 - y0) as f32 / 2.0 - rad);
                 let d = dx.max(0.0).hypot(dy.max(0.0)) - rad;
@@ -193,39 +197,53 @@ pub fn draw(text: &mut TextRenderer, width: i32, height: i32, s: i32, hover: boo
                 let i = ((y * width + x) * 4) as usize;
                 let px = &mut buf[i..i + 4];
                 if task.active {
-                    // lit glass: brighter, with a glow of the accent rising from the bottom
-                    blend(px, [1.0, 1.0, 1.0], (0.20 - 0.08 * t) * cover);
+                    blend(px, [1.0, 1.0, 1.0], (0.50 - 0.18 * t) * cover);
                     let cxn = ((x as f32 + 0.5 - (x0 + x1) as f32 / 2.0) / ((x1 - x0) as f32 / 2.0)).abs();
-                    let glow = (t - 0.35).max(0.0) / 0.65 * (1.0 - cxn * cxn).max(0.0);
-                    blend(px, pal.light(0.45), 0.55 * glow * cover);
+                    let glow = (t - 0.4).max(0.0) / 0.6 * (1.0 - cxn * cxn).max(0.0);
+                    blend(px, pal.accent, 0.45 * glow * cover);
                 } else if !task.minimized {
-                    blend(px, [1.0, 1.0, 1.0], (0.08 - 0.04 * t) * cover);
-                }
-                if t < 0.45 && !task.minimized {
-                    blend(px, [1.0, 1.0, 1.0], 0.10 * (1.0 - t / 0.45) * cover * pal.shine);
+                    blend(px, [1.0, 1.0, 1.0], (0.26 - 0.12 * t) * cover);
+                } else {
+                    blend(px, [1.0, 1.0, 1.0], 0.10 * cover);
                 }
                 if d > -1.2 * sf {
-                    let edge = if task.active { 0.60 } else if task.minimized { 0.14 } else { 0.30 };
+                    let edge = if task.active { 0.95 } else if task.minimized { 0.30 } else { 0.60 };
                     blend(px, [1.0, 1.0, 1.0], edge * cover);
                 } else if d > -2.2 * sf {
-                    blend(px, [0.0, 0.0, 0.0], 0.18 * cover);
+                    blend(px, pal.dark(0.55), 0.22 * cover);
                 }
             }
         }
-        // the program's icon, then its title
-        let mut tx = x0 + 8 * s;
-        if let Some(icon) = &task.icon {
-            crate::icons::blit_icon(&mut buf, width, height, icon, x0 + 7 * s, (height - icon.size) / 2, if task.minimized { 0.55 } else { 1.0 });
-            tx = x0 + 7 * s + icon.size + 6 * s;
-        }
-        let color = if task.minimized { [200, 215, 230] } else { [255, 255, 255] };
-        if let Some(img) = text.line(&task.title, x1 - tx - 6 * s, 13.0 * sf, color, Some(([0, 0, 0], 0.55)), 2 * s) {
-            blit(&mut buf, width, height, &img, tx, (height - img.height) / 2);
+        match &task.icon {
+            Some(icon) => {
+                crate::icons::blit_icon(&mut buf, width, height, icon, x0 + ((x1 - x0) - icon.size) / 2, (height - icon.size) / 2, if task.minimized { 0.55 } else { 1.0 });
+            }
+            None => {
+                let letter: String = task.title.trim_start_matches('*').chars().next().map(|c| c.to_uppercase().collect()).unwrap_or_default();
+                if let Some(img) = text.line(&letter, x1 - x0, 17.0 * sf, ink, Some(([255, 255, 255], 0.8)), 2 * s) {
+                    blit(&mut buf, width, height, &img, x0 + ((x1 - x0) - img.width) / 2, (height - img.height) / 2);
+                }
+            }
         }
     }
-    // the clock, with a soft glow, at the right
-    if let Some(img) = text.line(clock, 120 * s, 16.0 * sf, [255, 255, 255], pal.glow(0.9), 3 * s) {
-        blit(&mut buf, width, height, &img, width - img.width - 14 * s, (height - img.height) / 2);
+    // the clock (and under it the date), in the dark ink with a white glow, at the right
+    {
+        let mut lines = clock.splitn(2, '\n');
+        let (time, date) = (lines.next().unwrap_or(""), lines.next().unwrap_or(""));
+        let glow = Some(([255, 255, 255], 0.9));
+        let t_img = text.line(time, 120 * s, 16.0 * sf, ink, glow, 3 * s);
+        let d_img = if date.is_empty() { None } else { text.line(date, 120 * s, 10.5 * sf, ink, Some(([255, 255, 255], 0.8)), 2 * s) };
+        let col_w = t_img.as_ref().map(|i| i.width).unwrap_or(0).max(d_img.as_ref().map(|i| i.width).unwrap_or(0));
+        let total = t_img.as_ref().map(|i| i.height).unwrap_or(0) + d_img.as_ref().map(|i| i.height - 5 * s).unwrap_or(0);
+        let mut y = (height - total) / 2;
+        let cx = width - 14 * s - col_w / 2;
+        if let Some(img) = &t_img {
+            blit(&mut buf, width, height, img, cx - img.width / 2, y);
+            y += img.height - 3 * s;
+        }
+        if let Some(img) = &d_img {
+            blit(&mut buf, width, height, img, cx - img.width / 2, y);
+        }
     }
     buf
 }
@@ -255,12 +273,14 @@ pub fn draw_workspaces(buf: &mut [u8], width: i32, height: i32, s: i32, current:
                     continue;
                 }
                 let idx = ((y * width + x) * 4) as usize;
+                let ink = crate::theme::palette().ink;
+                let ink = [ink[0] as f32 / 255.0, ink[1] as f32 / 255.0, ink[2] as f32 / 255.0];
                 if on {
-                    blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], 0.95 * cover);
+                    blend(&mut buf[idx..idx + 4], ink, 0.85 * cover);
                 } else {
                     // a ring
                     let ring = (1.0 - ((r - d) / (1.4 * sf)).clamp(0.0, 1.0)).max(0.0);
-                    blend(&mut buf[idx..idx + 4], [1.0, 1.0, 1.0], (0.12 + 0.6 * ring) * cover);
+                    blend(&mut buf[idx..idx + 4], ink, (0.08 + 0.55 * ring) * cover);
                 }
             }
         }
@@ -269,6 +289,8 @@ pub fn draw_workspaces(buf: &mut [u8], width: i32, height: i32, s: i32, current:
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StatusKind {
+    Cpu,
+    Memory,
     Volume,
     Network,
     KeyboardLayout,
@@ -301,7 +323,7 @@ pub fn draw_status(
     let mut right = width as f32 - (112.0 + workspace_dots_width(workspaces)) * sf;
     let mut rects = Vec::new();
     for (kind, label) in items {
-        let Some(img) = text.line(label, 220 * s, 12.5 * sf, [255, 255, 255], pal.glow(0.8), 2 * s) else { continue };
+        let Some(img) = text.line(label, 220 * s, 12.5 * sf, pal.ink, Some(([255, 255, 255], 0.8)), 2 * s) else { continue };
         let x0 = right as i32 - img.width;
         blit(buf, width, height, &img, x0, (height - img.height) / 2);
         rects.push((*kind, x0 / s, (x0 + img.width) / s));
@@ -527,7 +549,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_orb_is_green_and_the_strip_is_blue_with_a_clock() {
+    fn the_start_tile_is_pale_with_colour_and_the_strip_is_light_blue_with_a_clock() {
         let mut text = TextRenderer::default();
         let (w, h) = (400, HEIGHT);
         let buf = draw(&mut text, w, h, 1, false, "12:34", &[Task { title: "Files".into(), active: true, ..Default::default() }, Task { title: "Terminal".into(), ..Default::default() }]);
@@ -535,22 +557,26 @@ mod tests {
             let i = ((y * w + x) * 4) as usize;
             [buf[i] as i32, buf[i + 1] as i32, buf[i + 2] as i32, buf[i + 3] as i32]
         };
-        let orb = at(ORB_MARGIN + ORB_SIZE / 2, h / 2 + 6);
-        assert!(orb[1] > orb[0] + 40 && orb[1] > orb[2] + 20, "a green orb: {orb:?}");
+        let (cx, cy) = (ORB_MARGIN + ORB_SIZE / 2, h / 2);
+        let tile = at(cx, cy + 12);
+        assert!(tile[0] > 150 && tile[1] > 170 && tile[2] > 200, "a pale glass tile: {tile:?}");
+        // the red bubble at the upper left of the mark
+        let bubble = at(cx - (0.27 * ORB_SIZE as f32 / 2.0) as i32, cy - (0.27 * ORB_SIZE as f32 / 2.0) as i32);
+        assert!(bubble[0] > bubble[1] + 60, "the mark has a red bubble: {bubble:?}");
         let strip = at(150, h - 4);
-        assert!(strip[2] > strip[0] + 30 && strip[3] > 100, "a blue translucent strip: {strip:?}");
-        // some white-ish ink where the clock is (if the machine has fonts at all)
+        assert!(strip[2] > strip[0] && strip[0] * 255 / strip[3].max(1) > 120 && strip[3] > 100, "a light blue translucent strip: {strip:?}");
+        // dark ink where the clock is (if the machine has fonts at all)
         let mut ink = 0;
         for y in 0..h {
             for x in (w - 90)..(w - 10) {
-                if at(x, y)[0] > 200 {
+                if at(x, y)[0] < 110 {
                     ink += 1;
                 }
             }
         }
         assert!(ink > 0 || text.line("x", 50, 16.0, [0; 3], None, 0).is_none(), "the clock leaves ink");
         // two task buttons: the first is the active, lighter one
-        let (a, b) = (at(TASKS_LEFT + 80, h - 8), at(TASKS_LEFT + 80 + 174, h - 8));
+        let (a, b) = (at(TASKS_LEFT + 6, h - 9), at(TASKS_LEFT + 6 + TASK_MAX_W + TASK_GAP, h - 9));
         assert!(a[0] > b[0], "the active task is lighter: {a:?} {b:?}");
         assert_eq!(task_at((TASKS_LEFT + 5) as f64, 20.0, w, h, 2), Some(0));
         assert_eq!(task_at((TASKS_LEFT + TASK_MAX_W + TASK_GAP + 5) as f64, 20.0, w, h, 2), Some(1));
@@ -637,17 +663,19 @@ mod tests {
     #[test]
     fn at_scale_two_the_bar_and_menu_are_twice_as_many_pixels_and_the_orb_is_twice_as_wide() {
         let mut text = TextRenderer::default();
-        // an orb's width in pixels along the middle row: count the green pixels
+        // the start button's width in pixels along the middle row: from its first to its last
+        // dark outline pixel
         let mut orb_width = |s: i32| {
             let (w, h) = (400 * s, HEIGHT * s);
             let buf = draw(&mut text, w, h, s, false, "", &[]);
             let y = h / 2;
-            (0..(ORB_SIZE + 2 * ORB_MARGIN) * s)
+            let dark: Vec<i32> = (0..(ORB_SIZE + 2 * ORB_MARGIN) * s)
                 .filter(|&x| {
                     let i = ((y * w + x) * 4) as usize;
-                    buf[i + 1] as i32 > buf[i] as i32 + 40 && buf[i + 1] as i32 > buf[i + 2] as i32 + 20
+                    buf[i] as i32 + buf[i + 1] as i32 + buf[i + 2] as i32 > 0 && (buf[i] as i32 + buf[i + 1] as i32 + buf[i + 2] as i32) < 330
                 })
-                .count() as i32
+                .collect();
+            dark.last().unwrap_or(&0) - dark.first().unwrap_or(&0) + 1
         };
         let (one, two) = (orb_width(1), orb_width(2));
         assert!((one - ORB_SIZE).abs() <= 4 && (two - 2 * ORB_SIZE).abs() <= 6, "the orb is about 32 px wide at 1x and 64 px at 2x: {one} {two}");
