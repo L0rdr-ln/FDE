@@ -95,7 +95,7 @@ impl Default for GlassStyle {
             title_center: 0.0,
             radius_bottom: 12.0,
             title_ink: [0.024, 0.137, 0.239],
-            title_ink_dim: [0.275, 0.345, 0.408],
+            title_ink_dim: [0.059, 0.133, 0.212],
             title_glow: 0.95,
             blur_levels: 3,
         }

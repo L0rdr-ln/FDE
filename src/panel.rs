@@ -119,7 +119,8 @@ pub fn draw(text: &mut TextRenderer, width: i32, height: i32, s: i32, hover: boo
             }
         }
     }
-    // the start orb: a green sphere with a bright highlight
+    // the start orb: a glossy sphere lit from the upper left, a soft light bouncing up from
+    // below, a bright highlight and a dark outline, with four bubbles on it
     let (cx, cy) = orb_center(height / s);
     let (cx, cy) = (cx as f32 * sf, cy as f32 * sf);
     let r = ORB_SIZE as f32 / 2.0 * sf;
@@ -131,23 +132,42 @@ pub fn draw(text: &mut TextRenderer, width: i32, height: i32, s: i32, hover: boo
             if cover <= 0.0 {
                 continue;
             }
-            let ny = (dy / r).clamp(-1.0, 1.0);
-            let shade = 0.5 - 0.35 * ny + if hover { 0.15 } else { 0.0 };
-            let green = [
-                (pal.orb[0] * (0.55 + 0.7 * shade)).min(1.0),
-                (pal.orb[1] * (0.55 + 0.7 * shade)).min(1.0),
-                (pal.orb[2] * (0.55 + 0.7 * shade)).min(1.0),
-            ];
+            let (nx, ny) = (dx / r, dy / r);
+            let lit = (1.0 - ((nx + 0.30).powi(2) + (ny + 0.40).powi(2)).sqrt() * 0.8).clamp(0.0, 1.0);
+            let k = 0.50 + 0.70 * lit + if hover { 0.14 } else { 0.0 };
+            let body = [(pal.orb[0] * k).min(1.0), (pal.orb[1] * k).min(1.0), (pal.orb[2] * k).min(1.0)];
             let i = ((y * width + x) * 4) as usize;
-            blend(&mut buf[i..i + 4], green, cover);
-            // the highlight in the upper half
-            if dy < 0.0 && d < r - sf {
-                let h = (1.0 - (-dy / r)).clamp(0.0, 1.0) * 0.55 * cover;
-                blend(&mut buf[i..i + 4], [1.0, 1.0, 1.0], h * (1.0 - (d / r).powi(2)).max(0.0) * pal.shine.max(0.3));
+            let px = &mut buf[i..i + 4];
+            blend(px, body, cover);
+            // light bouncing up from below
+            let bounce = ((ny - 0.45) / 0.55).clamp(0.0, 1.0) * (1.0 - nx.abs()).max(0.0) * 0.35;
+            blend(px, [0.9, 1.0, 0.8], bounce * cover);
+            // the specular highlight
+            let (hx, hy) = (nx / 0.70, (ny + 0.50) / 0.34);
+            let h = (1.0 - (hx * hx + hy * hy).sqrt()).clamp(0.0, 1.0);
+            blend(px, [1.0, 1.0, 1.0], (h * h * (3.0 - 2.0 * h)) * 0.85 * pal.shine.max(0.4) * cover);
+            // outline: dark outside, a light line just inside
+            if d > r - 1.3 * sf {
+                blend(px, [0.0, 0.08, 0.04], 0.55 * cover);
+            } else if d > r - 2.6 * sf {
+                blend(px, [1.0, 1.0, 1.0], 0.30 * cover);
             }
-            // the rim
-            if d > r - 1.5 * sf {
-                blend(&mut buf[i..i + 4], [1.0, 1.0, 1.0], 0.35 * cover);
+        }
+    }
+    // four small bubbles in a square: the FDE mark
+    for (bx, by) in [(-0.27f32, -0.27f32), (0.27, -0.27), (-0.27, 0.27), (0.27, 0.27)] {
+        let (bcx, bcy, br) = (cx + bx * r, cy + by * r + 0.02 * r, 0.17 * r);
+        for y in (bcy - br - 2.0) as i32..(bcy + br + 2.0) as i32 {
+            for x in (bcx - br - 2.0) as i32..(bcx + br + 2.0) as i32 {
+                if x < 0 || y < 0 || x >= width || y >= height {
+                    continue;
+                }
+                let d = ((x as f32 + 0.5 - bcx).powi(2) + (y as f32 + 0.5 - bcy).powi(2)).sqrt();
+                let cover = (br + 0.5 - d).clamp(0.0, 1.0);
+                if cover > 0.0 {
+                    let i = ((y * width + x) * 4) as usize;
+                    blend(&mut buf[i..i + 4], [1.0, 1.0, 1.0], 0.92 * cover);
+                }
             }
         }
     }

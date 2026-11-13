@@ -111,6 +111,10 @@ void main() {
     bool in_client = px.x > border && px.x < size.x - border && px.y > border + titlebar && px.y < size.y - border;
     vec4 tint = in_client ? tint_client : tint_frame;
     vec3 rgb = mix(base, tint.rgb, tint.a);
+    // Aero keeps the frame light whatever is behind it, so dark title text always reads
+    if (!in_client) {
+        rgb = mix(rgb, vec3(0.92, 0.97, 1.0), 0.40 * (1.0 - tint.a));
+    }
 
     // gloss band on the upper half of the title bar, its lower edge sagging to the right
     if (px.y < border + titlebar) {

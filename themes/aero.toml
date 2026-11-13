@@ -14,14 +14,14 @@ glow = 1.0
 shadow = 1.0
 rim = 1.0
 title_ink = "#06233d"
-title_ink_dim = "#26394c"
+title_ink_dim = "#0f2236"
 title_glow = 0.95
 
 [buttons]
-style = "orb"
-size = 17
-gap = 7
-margin = 8
+style = "capsule"
+size = 18
+gap = 1
+margin = 6
 close = "#e64f2e"
 maximize = "#54ba4a"
 minimize = "#3d9be0"

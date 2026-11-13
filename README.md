@@ -91,7 +91,7 @@ Please attach the output of `fde --check` and `~/fde-last.log` to a report if so
 | | |
 |---|---|
 | **Alt+Return** | terminal (`foot`, or `$FDE_TERMINAL`) |
-| **Alt+drag**, title bar | move; borders resize; the three orbs minimize / maximize / close |
+| **Alt+drag**, title bar | move; borders resize; the three buttons minimize / maximize / close |
 | double-click the title bar | maximize or restore (pull a maximized window down to restore it) |
 | **Alt+right-drag** | resize from the nearest corner |
 | right-click the title bar, **Alt+Space** | window menu: minimize, maximize, always on top, move to a workspace, close |

@@ -98,7 +98,7 @@ impl Default for Theme {
             shadow: 1.0,
             rim: 1.0,
             title_ink: "#06233d".into(),
-            title_ink_dim: "#465868".into(),
+            title_ink_dim: "#0f2236".into(),
             title_glow: 0.95,
             title_align: "left".into(),
             buttons: Buttons::default(),
@@ -261,7 +261,7 @@ impl Palette {
         let t = c.theme();
         let (accent, _, _, gloss) = c.look();
         let a = crate::config::parse_color(&accent).unwrap_or([0.29, 0.66, 0.93]);
-        let flat = matches!(t.buttons.style.as_str(), "flat" | "capsule");
+        let flat = t.buttons.style == "flat";
         let orb = if flat { mix(a, [1.0; 3], 0.55) } else { crate::config::parse_color(&t.buttons.maximize).unwrap_or([0.33, 0.73, 0.29]) };
         let dark = mix(a, [0.0; 3], 0.62);
         Palette {
