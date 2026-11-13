@@ -32,6 +32,8 @@ const TASKS_LEFT: i32 = ORB_MARGIN * 2 + ORB_SIZE + 6;
 const TASK_GAP: i32 = 4;
 const TASK_MAX_W: i32 = 46;
 const CLOCK_ROOM: i32 = 90;
+/// The clock (and the date under it) at the right end of the bar can be clicked this far in.
+pub const CLOCK_HIT_WIDTH: i32 = 100;
 
 // Room at the right end of the bar for the clock, workspace dots and status labels (logical
 // pixels): set each time the status labels are drawn, so the window buttons stop before them.

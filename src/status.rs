@@ -175,6 +175,74 @@ pub fn network_label(n: &Network) -> String {
     }
 }
 
+/// A Wi-Fi network that can be seen.
+#[derive(Debug, Clone, PartialEq)]
+pub struct WifiNet {
+    pub ssid: String,
+    /// 0 .. 100
+    pub signal: u32,
+    /// the one connected to
+    pub active: bool,
+    pub secure: bool,
+}
+
+/// The fields of one `nmcli -t` line: split at the colons that are not escaped (`\:`).
+pub fn split_nmcli(line: &str) -> Vec<String> {
+    let mut fields = vec![String::new()];
+    let mut chars = line.chars();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => {
+                if let Some(next) = chars.next() {
+                    fields.last_mut().unwrap().push(next);
+                }
+            }
+            ':' => fields.push(String::new()),
+            _ => fields.last_mut().unwrap().push(c),
+        }
+    }
+    fields
+}
+
+/// The networks in `nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY dev wifi list`: each name once (the
+/// strongest), the connected one first, then by signal.
+pub fn parse_wifi_list(out: &str) -> Vec<WifiNet> {
+    let mut nets: Vec<WifiNet> = Vec::new();
+    for line in out.lines() {
+        let f = split_nmcli(line);
+        if f.len() < 3 || f[1].is_empty() {
+            continue;
+        }
+        let net = WifiNet {
+            ssid: f[1].clone(),
+            signal: f[2].parse().unwrap_or(0).min(100),
+            active: f[0] == "*",
+            secure: f.get(3).is_some_and(|s| !s.is_empty() && s != "--"),
+        };
+        match nets.iter_mut().find(|n| n.ssid == net.ssid) {
+            Some(old) => {
+                old.active |= net.active;
+                old.signal = old.signal.max(net.signal);
+            }
+            None => nets.push(net),
+        }
+    }
+    nets.sort_by(|a, b| b.active.cmp(&a.active).then(b.signal.cmp(&a.signal)));
+    nets
+}
+
+/// The Wi-Fi networks in range, from NetworkManager (None without it). Takes a moment.
+pub fn wifi_networks() -> Option<Vec<WifiNet>> {
+    let out = Command::new("timeout").args(["8", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list"]).output().ok()?;
+    out.status.success().then(|| parse_wifi_list(&String::from_utf8_lossy(&out.stdout)))
+}
+
+/// Connect to a network NetworkManager knows or that is open (others need a password: use the
+/// network settings).
+pub fn connect_wifi(ssid: &str) {
+    let _ = Command::new("nmcli").args(["--wait", "15", "dev", "wifi", "connect", ssid]).spawn();
+}
+
 /// The network settings: NetworkManager's editor if it is installed, else its text interface in
 /// the terminal.
 pub fn open_network_settings(terminal: &str) {
@@ -303,6 +371,17 @@ mod tests {
         assert_eq!(parse_meminfo("MemTotal:       16000000 kB\nMemFree: 1 kB\nMemAvailable:    4000000 kB\n"), Some(75));
         assert_eq!(parse_meminfo("nothing"), None);
         assert_eq!((cpu_label(7), memory_label(41)), ("CPU 7%".to_string(), "RAM 41%".to_string()));
+    }
+
+    #[test]
+    fn wifi_networks_are_read_from_nmcli_output() {
+        let out = "*:Home:77:WPA2\n :Cafe:41:--\n :Home:50:WPA2\n :Neighbour\\: 2.4:63:WPA1 WPA2\n::30:WPA2\n";
+        let nets = parse_wifi_list(out);
+        assert_eq!(nets.len(), 3, "hidden networks and duplicates are gone: {nets:?}");
+        assert_eq!((nets[0].ssid.as_str(), nets[0].signal, nets[0].active, nets[0].secure), ("Home", 77, true, true), "the connected one first, with its best signal");
+        assert_eq!(nets[1].ssid, "Neighbour: 2.4", "an escaped colon stays in the name");
+        assert_eq!((nets[2].ssid.as_str(), nets[2].secure), ("Cafe", false), "an open network");
+        assert_eq!(split_nmcli("a\\:b:c"), vec!["a:b", "c"]);
     }
 
     #[test]

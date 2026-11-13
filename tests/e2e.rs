@@ -4571,3 +4571,171 @@ fn a_three_finger_swipe_switches_workspaces_and_a_pinch_goes_to_the_program() {
     assert_eq!(got, ["begin 2", "scale 1.5", "end"], "the program saw the pinch");
     stop.store(true, std::sync::atomic::Ordering::SeqCst);
 }
+
+// ------------------------------------------------------------------ flyouts of the task bar
+
+/// The pixels of the scene at the probe points, after the harness has run a little.
+fn probe_scene(hn: &mut Harness, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, glass: &Glass, scene: &mut GlesTexture, points: &[(i32, i32)]) -> Vec<[i32; 3]> {
+    hn.pump();
+    hn.state.render_scene(renderer, glass, scene).unwrap();
+    let bytes = grab_scene(renderer, scene);
+    points.iter().map(|&(x, y)| pixel(&bytes, 800, x, y)).collect()
+}
+
+fn click(hn: &mut Harness, x: f64, y: f64) {
+    hn.state.pointer_moved((x, y).into(), 0);
+    hn.pump_for(120);
+    hn.state.pointer_button(0x110, true, 0);
+    hn.pump_for(30);
+    hn.state.pointer_button(0x110, false, 0);
+    hn.pump_for(60);
+}
+
+#[test]
+fn clicking_the_clock_opens_a_calendar_that_pages_through_the_months_and_closes_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FDE_BUILTIN_SKY", "1");
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let mut renderer = match offscreen_renderer() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("no GL context here ({e}): flyout test skipped");
+            return;
+        }
+    };
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-flyout").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let glass = Glass::new(&mut renderer).unwrap();
+    let mut scene: GlesTexture = create_scene(&mut renderer, (800, 600).into()).unwrap();
+    let mut panel = std::process::Command::new(env!("CARGO_BIN_EXE_fde-panel"))
+        .env("WAYLAND_DISPLAY", "fde-e2e-flyout")
+        .env("HOME", &home)
+        .env_remove("DISPLAY")
+        .spawn()
+        .unwrap();
+    hn.pump_for(700);
+
+    // where the calendar will be: above the right end of the bar
+    let points = [(560, 360), (600, 420), (680, 480), (740, 520), (640, 340)];
+    let before = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &points);
+    let differs = |a: &[[i32; 3]], b: &[[i32; 3]]| a.iter().zip(b).map(|(p, q)| (p[0] - q[0]).abs() + (p[1] - q[1]).abs() + (p[2] - q[2]).abs()).sum::<i32>();
+
+    click(&mut hn, 760.0, 580.0);
+    let t0 = Instant::now();
+    let mut open = before.clone();
+    while t0.elapsed() < Duration::from_secs(8) {
+        open = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &points);
+        if differs(&before, &open) > 150 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(differs(&before, &open) > 150, "a click on the clock opened no calendar: {before:?} {open:?}");
+
+    // the arrow at the top right of the calendar shows the next month: the grid changes
+    let grid: Vec<(i32, i32)> = (0..6).flat_map(|r| (0..7).map(move |c| (556 + c * 32 + 16, 392 + r * 26 + 13))).collect();
+    let (_, before_grid) = (0, probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &grid));
+    click(&mut hn, 769.0, 350.0);
+    let t0 = Instant::now();
+    let mut after_grid = before_grid.clone();
+    while t0.elapsed() < Duration::from_secs(5) {
+        after_grid = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &grid);
+        if differs(&before_grid, &after_grid) > 60 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(differs(&before_grid, &after_grid) > 60, "the next month did not change the calendar");
+
+    // a second click on the clock closes it
+    click(&mut hn, 760.0, 580.0);
+    let t0 = Instant::now();
+    let mut closed = open.clone();
+    while t0.elapsed() < Duration::from_secs(5) {
+        closed = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &points);
+        if differs(&before, &closed) < 20 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let _ = panel.kill();
+    let _ = panel.wait();
+    assert!(differs(&before, &closed) < 20, "the calendar did not close: {before:?} {closed:?}");
+}
+
+#[test]
+fn resting_on_a_window_button_shows_its_title_in_a_tooltip_until_the_pointer_leaves() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FDE_BUILTIN_SKY", "1");
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let mut renderer = match offscreen_renderer() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("no GL context here ({e}): tooltip test skipped");
+            return;
+        }
+    };
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-tip").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let glass = Glass::new(&mut renderer).unwrap();
+    let mut scene: GlesTexture = create_scene(&mut renderer, (800, 600).into()).unwrap();
+    let mut panel = std::process::Command::new(env!("CARGO_BIN_EXE_fde-panel"))
+        .env("WAYLAND_DISPLAY", "fde-e2e-tip")
+        .env("HOME", &home)
+        .env_remove("DISPLAY")
+        .spawn()
+        .unwrap();
+    hn.pump_for(500);
+    open_window(&mut hn, dir.path(), "fde-e2e-tip", 200, 100);
+    hn.state.pointer_moved((400.0, 300.0).into(), 0);
+    hn.pump_for(500);
+
+    // above the window button (it is at x 50..96 of the bar), where the tooltip will be
+    let points = [(60, 538), (73, 540), (86, 538), (73, 530)];
+    let before = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &points);
+    let differs = |a: &[[i32; 3]], b: &[[i32; 3]]| a.iter().zip(b).map(|(p, q)| (p[0] - q[0]).abs() + (p[1] - q[1]).abs() + (p[2] - q[2]).abs()).sum::<i32>();
+
+    hn.state.pointer_moved((73.0, 580.0).into(), 0);
+    hn.pump_for(100);
+    // not yet: a tooltip needs the pointer to rest
+    let early = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &points);
+    assert!(differs(&before, &early) < 40, "the tooltip came at once");
+    let t0 = Instant::now();
+    let mut shown = before.clone();
+    while t0.elapsed() < Duration::from_secs(8) {
+        hn.state.pointer_moved((73.0 + (t0.elapsed().as_millis() % 3) as f64, 580.0).into(), 0);
+        shown = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &points);
+        if differs(&before, &shown) > 120 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(differs(&before, &shown) > 120, "no tooltip appeared over the window button: {before:?} {shown:?}");
+
+    // the pointer goes away, the tooltip too
+    hn.state.pointer_moved((400.0, 300.0).into(), 0);
+    let t0 = Instant::now();
+    let mut gone = shown.clone();
+    while t0.elapsed() < Duration::from_secs(5) {
+        gone = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &points);
+        if differs(&before, &gone) < 40 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let _ = panel.kill();
+    let _ = panel.wait();
+    assert!(differs(&before, &gone) < 40, "the tooltip stayed: {before:?} {gone:?}");
+}

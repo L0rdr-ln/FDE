@@ -10,6 +10,7 @@ pub mod config;
 pub mod cursor;
 pub mod cursortheme;
 pub mod demo;
+pub mod flyout;
 pub mod foreign_toplevel;
 pub mod gestures;
 pub mod hotkeys;

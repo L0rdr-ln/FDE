@@ -5,8 +5,10 @@
 use std::io::Write;
 use std::os::fd::AsFd;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use fde::flyout::{self, Flyout, Hit};
 use fde::panel;
 use fde::text::TextRenderer;
 use wayland_client::globals::{registry_queue_init, GlobalListContents};
@@ -49,6 +51,17 @@ struct App {
     toggle_menu: bool,
     close_menu: bool,
     menu_entries: usize,
+    // the flyouts: a volume slider, Wi-Fi list, calendar, notification history or a tooltip
+    flyout: Option<OpenFlyout>,
+    pointer_on_flyout: bool,
+    pointer_inside: bool,
+    left_at: Option<Instant>,
+    click_clock: bool,
+    flyout_click: Option<(f64, f64)>,
+    flyout_dragging: bool,
+    flyout_configured: bool,
+    close_flyout: bool,
+    hover_task: Option<usize>,
     scale: fde::clientscale::ScaleTracker,
     output_names: std::collections::HashMap<wayland_client::backend::ObjectId, String>,
     // typing in the start menu
@@ -57,6 +70,30 @@ struct App {
     menu_move: i32,
     menu_enter: bool,
     xkb_state: Option<xkb::State>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FlyoutKind {
+    Tooltip(usize),
+    Volume,
+    Network,
+    Calendar,
+    Notifications,
+}
+
+/// A flyout while it is open.
+struct OpenFlyout {
+    content: Flyout,
+    kind: FlyoutKind,
+    surface: wl_surface::WlSurface,
+    layer: zwlr_layer_surface_v1::ZwlrLayerSurfaceV1,
+    effect: Option<ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1>,
+    file: Option<std::fs::File>,
+    /// logical size
+    size: (i32, i32),
+    hit: Hit,
+    dirty: bool,
+    refreshed: Instant,
 }
 
 struct Toplevel {
@@ -229,6 +266,8 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
         let n_menu = app.menu_entries;
         match event {
             wl_pointer::Event::Enter { surface, surface_x, surface_y, .. } => {
+                app.pointer_inside = true;
+                app.pointer_on_flyout = app.flyout.as_ref().is_some_and(|f| f.surface == surface);
                 app.pointer_on_menu = app.menu_surface.as_ref() == Some(&surface);
                 app.pointer = (surface_x, surface_y);
                 pointer_moved(app, n_menu);
@@ -238,6 +277,17 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                 pointer_moved(app, n_menu);
             }
             wl_pointer::Event::Leave { .. } => {
+                app.pointer_inside = false;
+                app.left_at = Some(Instant::now());
+                app.hover_task = None;
+                if app.pointer_on_flyout {
+                    app.pointer_on_flyout = false;
+                    app.flyout_dragging = false;
+                    if let Some(f) = app.flyout.as_mut() {
+                        f.hit = Hit::None;
+                        f.dirty = true;
+                    }
+                }
                 if app.pointer_on_menu {
                     app.close_menu = true;
                 }
@@ -252,13 +302,25 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                 if app.pointer_on_menu {
                     app.power_click = panel::power_at(app.pointer.0, app.pointer.1);
                     app.menu_click = if app.power_click.is_some() { None } else { panel::menu_row_at(app.pointer.1, n_menu) };
+                } else if app.pointer_on_flyout {
+                    app.flyout_click = Some(app.pointer);
+                    if let Some(f) = &app.flyout {
+                        if matches!(flyout::hit(&f.content, app.pointer.0, app.pointer.1), Hit::Slider(_)) {
+                            app.flyout_dragging = true;
+                        }
+                    }
                 } else if panel::on_orb(app.pointer.0, app.pointer.1, app.size.1) {
                     app.clicked_orb = true;
                 } else if let Some(kind) = status_at(app) {
                     app.click_status = Some(kind);
+                } else if app.pointer.0 as i32 >= app.size.0 - panel::CLOCK_HIT_WIDTH {
+                    app.click_clock = true;
                 } else {
                     app.click_task = panel::task_at(app.pointer.0, app.pointer.1, app.size.0, app.size.1, app.toplevels.len());
                 }
+            }
+            wl_pointer::Event::Button { state: WEnum::Value(wl_pointer::ButtonState::Released), .. } => {
+                app.flyout_dragging = false;
             }
             wl_pointer::Event::Axis { axis: WEnum::Value(wl_pointer::Axis::VerticalScroll), value, .. } if !app.pointer_on_menu => {
                 if let Some(kind) = status_at(app) {
@@ -290,12 +352,25 @@ fn pointer_moved(app: &mut App, n_menu: usize) {
             }
             app.menu_dirty = true;
         }
+    } else if app.pointer_on_flyout {
+        let (x, y) = app.pointer;
+        if let Some(f) = app.flyout.as_mut() {
+            let h = flyout::hit(&f.content, x, y);
+            if h != f.hit {
+                f.hit = h;
+                f.dirty = true;
+            }
+        }
+        if app.flyout_dragging {
+            app.flyout_click = Some(app.pointer);
+        }
     } else {
         let hover = panel::on_orb(app.pointer.0, app.pointer.1, app.size.1);
         if hover != app.hover {
             app.hover = hover;
             app.hover_changed = true;
         }
+        app.hover_task = panel::task_at(app.pointer.0, app.pointer.1, app.size.0, app.size.1, app.toplevels.len());
     }
 }
 
@@ -308,6 +383,11 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, u8> for App {
                 if *which == 0 {
                     app.size = (width as i32, height as i32);
                     app.configured = true;
+                } else if *which == 2 {
+                    app.flyout_configured = true;
+                    if let Some(f) = app.flyout.as_mut() {
+                        f.dirty = true;
+                    }
                 } else {
                     app.menu_configured = true;
                     app.menu_dirty = true;
@@ -316,6 +396,8 @@ impl Dispatch<zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, u8> for App {
             zwlr_layer_surface_v1::Event::Closed => {
                 if *which == 0 {
                     app.closed = true;
+                } else if *which == 2 {
+                    app.close_flyout = true;
                 } else {
                     app.close_menu = true;
                 }
@@ -434,7 +516,8 @@ fn open_menu(
     let layer = shell.get_layer_surface(&surface, output, zwlr_layer_shell_v1::Layer::Overlay, "start-menu".into(), qh, 1u8);
     layer.set_size(w as u32, h as u32);
     layer.set_anchor(zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Left);
-    layer.set_margin(0, 0, panel::HEIGHT + 4, 6);
+    // the bar's own reserved space already keeps this above it: only a small gap
+    layer.set_margin(0, 0, 4, 6);
     layer.set_exclusive_zone(0);
     layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::Exclusive);
     if let Some(b) = blur {
@@ -446,6 +529,42 @@ fn open_menu(
     }
     surface.commit();
     Menu { surface, layer, file: None }
+}
+
+/// A surface for a flyout just above the task bar, `x` points from the left edge of the monitor.
+/// A tooltip takes no input at all, so the pointer goes through it.
+#[allow(clippy::too_many_arguments)]
+fn make_flyout_surface(
+    compositor: &wl_compositor::WlCompositor,
+    shell: &zwlr_layer_shell_v1::ZwlrLayerShellV1,
+    qh: &QueueHandle<App>,
+    blur: &Option<ext_background_effect_manager_v1::ExtBackgroundEffectManagerV1>,
+    output: Option<&wl_output::WlOutput>,
+    size: (i32, i32),
+    x: i32,
+    interactive: bool,
+) -> (wl_surface::WlSurface, zwlr_layer_surface_v1::ZwlrLayerSurfaceV1, Option<ext_background_effect_surface_v1::ExtBackgroundEffectSurfaceV1>) {
+    let surface = compositor.create_surface(qh, ());
+    let layer = shell.get_layer_surface(&surface, output, zwlr_layer_shell_v1::Layer::Overlay, "flyout".into(), qh, 2u8);
+    layer.set_size(size.0 as u32, size.1 as u32);
+    layer.set_anchor(zwlr_layer_surface_v1::Anchor::Bottom | zwlr_layer_surface_v1::Anchor::Left);
+    layer.set_margin(0, 0, 4, x);
+    layer.set_exclusive_zone(0);
+    layer.set_keyboard_interactivity(zwlr_layer_surface_v1::KeyboardInteractivity::None);
+    if !interactive {
+        let none = compositor.create_region(qh, ());
+        surface.set_input_region(Some(&none));
+        none.destroy();
+    }
+    let effect = blur.as_ref().map(|b| b.get_background_effect(&surface, qh, ()));
+    if let Some(e) = &effect {
+        let region = compositor.create_region(qh, ());
+        region.add(0, 0, size.0, size.1);
+        e.set_blur_region(Some(&region));
+        region.destroy();
+    }
+    surface.commit();
+    (surface, layer, effect)
 }
 
 /// The compositor sends SIGUSR1 when the Windows key is tapped: open or close the start menu.
@@ -518,8 +637,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let entries = fde::apps::installed();
     let mut icons = fde::icons::IconCache::default();
     let mut filtered: Vec<usize> = Vec::new();
+    // flyouts: how long the pointer has rested on a window button, and the Wi-Fi list being fetched
+    let mut tip_since: Option<(usize, Instant)> = None;
+    let wifi_inbox: Arc<Mutex<Option<Vec<fde::status::WifiNet>>>> = Arc::default();
 
     while !app.closed {
+        let mut want: Option<(FlyoutKind, i32)> = None;
         if last_clock.elapsed() >= Duration::from_secs(10) {
             current_clock = clock();
             last_clock = Instant::now();
@@ -541,11 +664,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let mut status_now = shown_status.clone();
         let acted = app.click_status.is_some() || app.scroll_status.is_some();
         if let Some(kind) = app.click_status.take() {
+            let center = |k: panel::StatusKind| app.status_rects.iter().find(|(kk, _, _)| *kk == k).map(|(_, x0, x1)| (x0 + x1) / 2).unwrap_or(app.size.0 - 150);
             match kind {
-                panel::StatusKind::Volume => fde::status::toggle_mute(),
+                panel::StatusKind::Volume => want = Some((FlyoutKind::Volume, center(kind))),
                 panel::StatusKind::DoNotDisturb => fde::notify::set_dnd(false),
                 panel::StatusKind::Cpu | panel::StatusKind::Memory => {}
-                panel::StatusKind::Network => fde::status::open_network_settings(&terminal()),
+                panel::StatusKind::Network => want = Some((FlyoutKind::Network, center(kind))),
                 panel::StatusKind::KeyboardLayout => fde::kblayout::request_next(),
                 panel::StatusKind::Battery => {}
             }
@@ -720,11 +844,200 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 attach(&shm, &qh, &m.surface, &mut m.file, px, (mw * s, mh * s), s)?;
             }
         }
-        // wait for events, but wake up for the clock
+        // ---- the flyouts
+        {
+            let s = app.scale.current();
+            // a click on something in an open flyout
+            if let Some((x, y)) = app.flyout_click.take() {
+                let dragging = app.flyout_dragging;
+                let mut close = false;
+                if let Some(f) = app.flyout.as_mut() {
+                    let h = flyout::hit(&f.content, x, y);
+                    match (&mut f.content, h) {
+                        (Flyout::Volume { percent, muted }, Hit::Slider(_)) | (Flyout::Volume { percent, muted }, _) if dragging || matches!(h, Hit::Slider(_)) => {
+                            let r = flyout::slider_rect(250);
+                            let frac = ((x - r.0 as f64) / (r.2 - r.0) as f64).clamp(0.0, 1.0);
+                            let wanted = (frac * 100.0).round() as u32;
+                            if wanted != *percent || *muted {
+                                if *muted {
+                                    fde::status::set_mute(false);
+                                    *muted = false;
+                                }
+                                fde::status::set_volume(wanted);
+                                *percent = wanted;
+                            }
+                        }
+                        (Flyout::Volume { percent, muted }, Hit::Mute) => {
+                            fde::status::toggle_mute();
+                            if let Some(v) = fde::status::volume() {
+                                *percent = v.percent;
+                                *muted = v.muted;
+                            }
+                        }
+                        (Flyout::Network { networks, .. }, Hit::Network(i)) => {
+                            if let Some(net) = networks.as_ref().and_then(|l| l.get(i)) {
+                                fde::status::connect_wifi(&net.ssid);
+                                close = true;
+                            }
+                        }
+                        (Flyout::Network { .. }, Hit::NetworkSettings) => {
+                            fde::status::open_network_settings(&terminal());
+                            close = true;
+                        }
+                        (Flyout::Calendar { year, month, today }, Hit::CalPrev | Hit::CalNext | Hit::CalToday) => {
+                            match h {
+                                Hit::CalPrev => (*year, *month) = flyout::shift_month(*year, *month, -1),
+                                Hit::CalNext => (*year, *month) = flyout::shift_month(*year, *month, 1),
+                                _ => (*year, *month) = (today.0, today.1),
+                            }
+                        }
+                        _ => {}
+                    }
+                    f.dirty = true;
+                }
+                if close {
+                    app.close_flyout = true;
+                }
+                // the labels on the bar follow what was changed in the flyout
+                status_checked = Instant::now() - Duration::from_secs(10);
+            }
+            // the Wi-Fi list arrived
+            if let Some(list) = wifi_inbox.lock().ok().and_then(|mut g| g.take()) {
+                if let Some(Flyout::Network { networks, .. }) = app.flyout.as_mut().map(|f| &mut f.content) {
+                    *networks = Some(list);
+                    app.flyout.as_mut().map(|f| f.dirty = true);
+                }
+            }
+            // the volume may be changed elsewhere
+            if let Some(f) = app.flyout.as_mut() {
+                if matches!(f.kind, FlyoutKind::Volume) && !app.flyout_dragging && f.refreshed.elapsed() >= Duration::from_secs(1) {
+                    f.refreshed = Instant::now();
+                    if let (Some(v), Flyout::Volume { percent, muted }) = (fde::status::volume(), &mut f.content) {
+                        if (v.percent, v.muted) != (*percent, *muted) {
+                            (*percent, *muted) = (v.percent, v.muted);
+                            f.dirty = true;
+                        }
+                    }
+                }
+            }
+            // a flyout that was not touched for a while goes away
+            if let Some(f) = &app.flyout {
+                if !matches!(f.kind, FlyoutKind::Tooltip(_)) && !app.pointer_inside && app.left_at.is_some_and(|t| t.elapsed() > Duration::from_millis(1500)) {
+                    app.close_flyout = true;
+                }
+            }
+            // a click on the clock opens the calendar
+            if std::mem::take(&mut app.click_clock) {
+                want = Some((FlyoutKind::Calendar, app.size.0 - 52));
+            }
+            // a tooltip: the pointer has rested on a window's button for a moment
+            let tooltip_open = app.flyout.as_ref().and_then(|f| if let FlyoutKind::Tooltip(i) = f.kind { Some(i) } else { None });
+            if app.flyout.as_ref().is_none_or(|f| matches!(f.kind, FlyoutKind::Tooltip(_))) {
+                match app.hover_task {
+                    Some(i) => {
+                        if tip_since.map(|(j, _)| j) != Some(i) {
+                            tip_since = Some((i, Instant::now()));
+                        }
+                        if tooltip_open.is_some_and(|j| j != i) {
+                            app.close_flyout = true;
+                        } else if tooltip_open.is_none() && want.is_none() && tip_since.is_some_and(|(_, t)| t.elapsed() >= Duration::from_millis(350)) && app.toplevels.get(i).is_some() {
+                            let (x0, x1, _, _) = panel::task_rect(i, app.toplevels.len(), app.size.0, app.size.1);
+                            want = Some((FlyoutKind::Tooltip(i), (x0 + x1) / 2));
+                        }
+                    }
+                    None => {
+                        tip_since = None;
+                        if tooltip_open.is_some() {
+                            app.close_flyout = true;
+                        }
+                    }
+                }
+            }
+            // open one (a second click on the same label closes it)
+            if let Some((kind, anchor)) = want.take() {
+                let same = app.flyout.as_ref().map(|f| f.kind) == Some(kind);
+                if same && !matches!(kind, FlyoutKind::Tooltip(_)) {
+                    app.close_flyout = true;
+                } else if !same {
+                    if let Some(old) = app.flyout.take() {
+                        old.layer.destroy();
+                        old.surface.destroy();
+                        app.pointer_on_flyout = false;
+                        app.flyout_dragging = false;
+                    }
+                    app.close_flyout = false;
+                    app.flyout_configured = false;
+                    let content = match kind {
+                        FlyoutKind::Tooltip(i) => {
+                            let t = app.toplevels.get(i).map(|t| t.task.title.clone()).unwrap_or_default();
+                            Flyout::Tooltip(vec![if t.is_empty() { "(untitled)".to_string() } else { t }])
+                        }
+                        FlyoutKind::Volume => {
+                            let v = fde::status::volume();
+                            Flyout::Volume { percent: v.map(|v| v.percent).unwrap_or(0), muted: v.is_some_and(|v| v.muted) }
+                        }
+                        FlyoutKind::Network => {
+                            if let Ok(mut g) = wifi_inbox.lock() {
+                                *g = None;
+                            }
+                            let inbox = wifi_inbox.clone();
+                            std::thread::spawn(move || {
+                                let list = fde::status::wifi_networks().unwrap_or_default();
+                                if let Ok(mut g) = inbox.lock() {
+                                    *g = Some(list);
+                                }
+                            });
+                            Flyout::Network { current: fde::status::network(), networks: None }
+                        }
+                        FlyoutKind::Calendar => {
+                            let t = flyout::today();
+                            Flyout::Calendar { year: t.0, month: t.1, today: t }
+                        }
+                        FlyoutKind::Notifications => Flyout::Notifications { items: Vec::new(), dnd: fde::notify::dnd_on() },
+                    };
+                    let fsize = flyout::size(&content, &mut text, s);
+                    let x = (anchor - fsize.0 / 2).min(app.size.0 - fsize.0 - 6).max(6);
+                    let (fsurface, layer, effect) = make_flyout_surface(&compositor, &shell, &qh, &blur_manager, my_output.as_ref(), fsize, x, !matches!(kind, FlyoutKind::Tooltip(_)));
+                    app.flyout = Some(OpenFlyout { content, kind, surface: fsurface, layer, effect, file: None, size: fsize, hit: Hit::None, dirty: true, refreshed: Instant::now() });
+                }
+            }
+            if app.close_flyout {
+                app.close_flyout = false;
+                if let Some(f) = app.flyout.take() {
+                    f.layer.destroy();
+                    f.surface.destroy();
+                }
+                app.pointer_on_flyout = false;
+                app.flyout_dragging = false;
+            }
+            // draw it (and follow a change of its size: the Wi-Fi list arriving)
+            if let Some(f) = app.flyout.as_mut() {
+                let fsize = flyout::size(&f.content, &mut text, s);
+                if fsize != f.size {
+                    f.size = fsize;
+                    f.layer.set_size(fsize.0 as u32, fsize.1 as u32);
+                    if let Some(e) = &f.effect {
+                        let region = compositor.create_region(&qh, ());
+                        region.add(0, 0, fsize.0, fsize.1);
+                        e.set_blur_region(Some(&region));
+                        region.destroy();
+                    }
+                    f.dirty = true;
+                }
+                if f.dirty && app.flyout_configured {
+                    let px = flyout::draw(&f.content, &mut text, s, f.hit);
+                    attach(&shm, &qh, &f.surface, &mut f.file, px, (fsize.0 * s, fsize.1 * s), s)?;
+                    f.dirty = false;
+                }
+            }
+        }
+        // wait for events, but wake up for the clock (and sooner while a tooltip may be due or a
+        // flyout is open)
         queue.flush()?;
         if let Some(guard) = queue.prepare_read() {
             let mut fds = [libc::pollfd { fd: guard.connection_fd().as_raw_fd_(), events: libc::POLLIN, revents: 0 }];
-            let n = unsafe { libc::poll(fds.as_mut_ptr(), 1, 500) };
+            let wait = if app.hover_task.is_some() || app.flyout.is_some() { 100 } else { 500 };
+            let n = unsafe { libc::poll(fds.as_mut_ptr(), 1, wait) };
             if n > 0 {
                 let _ = guard.read();
             }
