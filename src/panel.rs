@@ -29,8 +29,19 @@ const TASK_MAX_W: i32 = 170;
 const CLOCK_ROOM: i32 = 90;
 
 /// The x range and the y range of task button `i` of `n` in a panel `width` wide.
+/// Room at the right end of the bar for the clock, workspace dots and status labels (logical
+/// pixels): set each time the status labels are drawn, so the window buttons stop before them.
+/// (The task bar draws on one thread.)
+thread_local! {
+    static RIGHT_ROOM: std::cell::Cell<i32> = const { std::cell::Cell::new(CLOCK_ROOM) };
+}
+
+pub fn right_room() -> i32 {
+    RIGHT_ROOM.with(|r| r.get())
+}
+
 pub fn task_rect(i: usize, n: usize, width: i32, height: i32) -> (i32, i32, i32, i32) {
-    let avail = (width - TASKS_LEFT - CLOCK_ROOM).max(0);
+    let avail = (width - TASKS_LEFT - right_room()).max(0);
     let w = ((avail - TASK_GAP * (n as i32 - 1).max(0)) / n.max(1) as i32).clamp(0, TASK_MAX_W);
     let x0 = TASKS_LEFT + i as i32 * (w + TASK_GAP);
     (x0, x0 + w, 5, height - 5)
@@ -220,6 +231,7 @@ pub fn draw_workspaces(buf: &mut [u8], width: i32, height: i32, s: i32, current:
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StatusKind {
     Volume,
+    Network,
     Battery,
     DoNotDisturb,
 }
@@ -255,6 +267,9 @@ pub fn draw_status(
         rects.push((*kind, x0 / s, (x0 + img.width) / s));
         right = x0 as f32 - 12.0 * sf;
     }
+    // the window buttons end a little before the leftmost label
+    let room = (width as f32 - right) / sf + 4.0;
+    RIGHT_ROOM.with(|r| r.set((room.ceil() as i32).max(CLOCK_ROOM)));
     rects
 }
 
@@ -484,6 +499,9 @@ mod tests {
         let mut buf = vec![0u8; (w * h * 4) as usize];
         let items = vec![(StatusKind::Volume, "Vol 45%".to_string()), (StatusKind::Battery, "Bat 87%".to_string())];
         let rects = draw_status(&mut text, &mut buf, w, h, 1, &items, 4);
+        // the window buttons now stop before the labels
+        let (_, x1, _, _) = task_rect(0, 1, w, h);
+        assert!(rects.iter().all(|r| x1 < r.1) || rects.is_empty(), "buttons end at {x1}, labels {rects:?}");
         if text.line("x", 50, 12.0, [0, 0, 0], None, 0).is_none() {
             return; // no fonts on this machine
         }

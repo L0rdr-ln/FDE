@@ -330,6 +330,11 @@ fn clock() -> String {
         .unwrap_or_default()
 }
 
+/// The terminal of the configuration (or $FDE_TERMINAL).
+fn terminal() -> String {
+    std::env::var("FDE_TERMINAL").unwrap_or_else(|_| fde::config::Config::load().unwrap_or_default().shell.terminal)
+}
+
 fn launch() {
     let config = fde::config::Config::load().unwrap_or_default();
     let cmd = std::env::var("FDE_LAUNCHER")
@@ -505,6 +510,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match kind {
                 panel::StatusKind::Volume => fde::status::toggle_mute(),
                 panel::StatusKind::DoNotDisturb => fde::notify::set_dnd(false),
+                panel::StatusKind::Network => fde::status::open_network_settings(&terminal()),
                 panel::StatusKind::Battery => {}
             }
         }
@@ -522,6 +528,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(v) = fde::status::volume() {
                 status_now.push((panel::StatusKind::Volume, fde::status::volume_label(v)));
             }
+            status_now.push((panel::StatusKind::Network, fde::status::network_label(&fde::status::network())));
             if let Some(b) = fde::status::battery() {
                 status_now.push((panel::StatusKind::Battery, fde::status::battery_label(b)));
             }
@@ -543,6 +550,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             size = app.size;
             let tasks: Vec<panel::Task> = app.toplevels.iter().map(|t| t.task.clone()).collect();
             let s = app.scale.current();
+            let room_before = panel::right_room();
             let mut rgba = panel::draw(&mut text, size.0 * s, size.1 * s, s, app.hover, &current_clock, &tasks);
             shown_ws = ws;
             if let Some((cur, count)) = ws {
@@ -559,7 +567,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             shown = current_clock.clone();
             shown_hover = app.hover;
-            dirty = false;
+            // the labels need more (or less) room than the buttons were drawn with: once more
+            dirty = panel::right_room() != room_before;
         }
         if app.clicked_orb {
             app.clicked_orb = false;

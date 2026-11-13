@@ -1,4 +1,4 @@
-//! Small status readouts for the task bar: volume (PipeWire or PulseAudio) and battery. Plain
+//! Small status readouts for the task bar: volume (PipeWire or PulseAudio), network and battery. Plain
 //! commands and files, nothing resident: the bar looks every couple of seconds.
 
 use std::process::Command;
@@ -95,6 +95,95 @@ pub fn battery() -> Option<Battery> {
     battery_in(std::path::Path::new("/sys/class/power_supply"))
 }
 
+/// How the machine is connected.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Network {
+    /// a Wi-Fi interface is up: the network's name if known, signal 0 .. 100 if known
+    Wifi { name: Option<String>, signal: Option<u32> },
+    Wired,
+    Offline,
+}
+
+/// The link quality of `iface` in `/proc/net/wireless` ("wlan0: 0000   54.  -56.  ..."), as a
+/// percentage of the usual maximum of 70.
+pub fn parse_wireless(text: &str, iface: &str) -> Option<u32> {
+    let line = text.lines().find(|l| l.trim_start().starts_with(&format!("{iface}:")))?;
+    let quality: f64 = line.split_whitespace().nth(2)?.trim_end_matches('.').parse().ok()?;
+    Some(((quality / 70.0) * 100.0).round().clamp(0.0, 100.0) as u32)
+}
+
+/// The connected Wi-Fi network in `nmcli -t -f active,ssid dev wifi` output ("yes:Home").
+pub fn parse_nmcli_ssid(out: &str) -> Option<String> {
+    out.lines().find_map(|l| l.strip_prefix("yes:")).map(|s| s.replace("\\:", ":")).filter(|s| !s.is_empty())
+}
+
+/// Look at the interfaces under `net` (`/sys/class/net`): Wi-Fi beats wired, up beats down.
+/// `wireless` is the text of `/proc/net/wireless`.
+pub fn network_in(net: &std::path::Path, wireless: &str) -> Network {
+    let mut names: Vec<String> = std::fs::read_dir(net)
+        .map(|d| d.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect())
+        .unwrap_or_default();
+    names.sort();
+    let mut wired = false;
+    for name in names {
+        let dir = net.join(&name);
+        // the loopback, and virtual links (bridges for containers, VPN tunnels) do not count
+        if name == "lo" || !dir.join("device").exists() {
+            continue;
+        }
+        let up = std::fs::read_to_string(dir.join("operstate")).map(|s| s.trim() == "up").unwrap_or(false);
+        if !up {
+            continue;
+        }
+        if dir.join("wireless").exists() || dir.join("phy80211").exists() {
+            return Network::Wifi { name: None, signal: parse_wireless(wireless, &name) };
+        }
+        wired = true;
+    }
+    if wired {
+        Network::Wired
+    } else {
+        Network::Offline
+    }
+}
+
+pub fn network() -> Network {
+    let wireless = std::fs::read_to_string("/proc/net/wireless").unwrap_or_default();
+    match network_in(std::path::Path::new("/sys/class/net"), &wireless) {
+        Network::Wifi { signal, .. } => {
+            let name = output("nmcli", &["-t", "-f", "active,ssid", "dev", "wifi"]).and_then(|o| parse_nmcli_ssid(&o));
+            Network::Wifi { name, signal }
+        }
+        other => other,
+    }
+}
+
+pub fn network_label(n: &Network) -> String {
+    match n {
+        Network::Wifi { name, signal } => {
+            let mut s = name.clone().unwrap_or_else(|| "Wi-Fi".to_string());
+            if s.chars().count() > 14 {
+                s = s.chars().take(13).collect::<String>() + "…";
+            }
+            match signal {
+                Some(p) => format!("{s} {p}%"),
+                None => s,
+            }
+        }
+        Network::Wired => "Wired".to_string(),
+        Network::Offline => "Offline".to_string(),
+    }
+}
+
+/// The network settings: NetworkManager's editor if it is installed, else its text interface in
+/// the terminal.
+pub fn open_network_settings(terminal: &str) {
+    if Command::new("nm-connection-editor").spawn().is_ok() {
+        return;
+    }
+    let _ = Command::new(terminal).args(["-e", "nmtui"]).spawn();
+}
+
 /// What a status label looks like.
 pub fn volume_label(v: Volume) -> String {
     if v.muted {
@@ -122,6 +211,37 @@ mod tests {
         assert_eq!(parse_pactl(v, "Mute: yes\n").unwrap().muted, true);
         assert_eq!(volume_label(Volume { percent: 45, muted: false }), "Vol 45%");
         assert_eq!(volume_label(Volume { percent: 45, muted: true }), "Vol muted");
+    }
+
+    #[test]
+    fn the_network_is_wifi_wired_or_offline_from_the_interfaces() {
+        let dir = tempfile::tempdir().unwrap();
+        let iface = |name: &str, state: &str, wifi: bool, physical: bool| {
+            let d = dir.path().join(name);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("operstate"), format!("{state}\n")).unwrap();
+            if wifi {
+                std::fs::create_dir_all(d.join("wireless")).unwrap();
+            }
+            if physical {
+                std::fs::create_dir_all(d.join("device")).unwrap();
+            }
+        };
+        iface("lo", "unknown", false, false);
+        iface("docker0", "up", false, false);
+        assert_eq!(network_in(dir.path(), ""), Network::Offline, "loopback and a container bridge are not a connection");
+        iface("enp0s3", "up", false, true);
+        assert_eq!(network_in(dir.path(), ""), Network::Wired);
+        iface("wlan0", "down", true, true);
+        assert_eq!(network_in(dir.path(), ""), Network::Wired, "Wi-Fi that is down does not count");
+        iface("wlan0", "up", true, true);
+        let wireless = "Inter-| sta-|   Quality\n face | tus | link level noise\n wlan0: 0000   54.  -56.  -256        0      0      0      0     12        0\n";
+        assert_eq!(network_in(dir.path(), wireless), Network::Wifi { name: None, signal: Some(77) });
+        assert_eq!(network_label(&Network::Wifi { name: Some("Home".into()), signal: Some(77) }), "Home 77%");
+        assert_eq!(network_label(&Network::Wifi { name: Some("A very long network name".into()), signal: None }), "A very long n…");
+        assert_eq!(network_label(&Network::Offline), "Offline");
+        assert_eq!(parse_nmcli_ssid("no:Neighbour\nyes:Home\n"), Some("Home".into()));
+        assert_eq!(parse_nmcli_ssid("no:Neighbour\n"), None);
     }
 
     #[test]
