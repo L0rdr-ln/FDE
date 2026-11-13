@@ -14,6 +14,7 @@ pub mod foreign_toplevel;
 pub mod glass;
 pub mod handlers;
 pub mod input;
+pub mod kblayout;
 pub mod layers;
 pub mod lockscreen;
 pub mod nightlight;

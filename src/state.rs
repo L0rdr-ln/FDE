@@ -450,7 +450,11 @@ impl Fde {
             self.cursor_textures.clear();
         }
         let outputs_changed = new.outputs != self.config.outputs;
+        let layouts_changed = new.input.keyboard_layout != self.config.input.keyboard_layout;
         self.config = new;
+        if layouts_changed {
+            self.write_layout_state();
+        }
         if outputs_changed {
             let cfg = self.config.clone();
             self.apply_output_config(&cfg);

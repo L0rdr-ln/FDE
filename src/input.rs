@@ -31,6 +31,7 @@ enum Action {
     ToggleHelp,
     WindowMenu,
     Tile,
+    NextLayout,
     MenuKey(i32, bool, bool),
     CloseHelp,
     Restore,
@@ -57,6 +58,7 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+1 .. 9", "go to a workspace (Shift: send the window there)"),
     ("Alt+Ctrl+Left / Right", "previous or next workspace"),
     ("Windows key", "open the start menu"),
+    ("Windows+Space", "next keyboard layout (input.keyboard_layout = \"us,de\")"),
     ("Alt+T", "tile the windows side by side (again: put them back)"),
     ("Alt+Space", "the window menu (or right-click a title bar)"),
     ("Alt+L", "lock the screen"),
@@ -130,6 +132,9 @@ impl Fde {
                             if let Some(a) = a {
                                 return FilterResult::Intercept(a);
                             }
+                        }
+                        if event.state() == KeyState::Pressed && mods.logo && sym == keysyms::KEY_space {
+                            return FilterResult::Intercept(Action::NextLayout);
                         }
                         if event.state() == KeyState::Pressed && mods.alt && sym == keysyms::KEY_space {
                             return FilterResult::Intercept(Action::WindowMenu);
@@ -265,6 +270,7 @@ impl Fde {
             }
             Action::MenuKey(step, enter, escape) => self.window_menu_key(step, enter, escape),
             Action::Tile => self.toggle_tiling(),
+            Action::NextLayout => self.next_layout(),
             Action::CloseHelp => self.help_open = false,
             Action::Restore => self.restore_window(),
             Action::Lock => crate::shell::start_sibling("fde-lock"),

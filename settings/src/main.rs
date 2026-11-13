@@ -424,7 +424,7 @@ fn music_page(cfg: &Config, status: &Status) -> GBox {
 }
 
 fn keyboard_page(cfg: &Config, status: &Status) -> GBox {
-    let (outer, body) = page("Keyboard", "Layout is an xkb name such as us, de, fr or us(intl). Leave empty for the system default.");
+    let (outer, body) = page("Keyboard", "Layout is an xkb name such as us, de, fr or us(intl). Leave empty for the system default. Several, separated by commas (us,de), switch with Windows+Space or the task bar.");
     let layout = gtk4::Entry::new();
     layout.set_text(&cfg.input.keyboard_layout);
     layout.set_placeholder_text(Some("system default"));

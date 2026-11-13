@@ -511,6 +511,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 panel::StatusKind::Volume => fde::status::toggle_mute(),
                 panel::StatusKind::DoNotDisturb => fde::notify::set_dnd(false),
                 panel::StatusKind::Network => fde::status::open_network_settings(&terminal()),
+                panel::StatusKind::KeyboardLayout => fde::kblayout::request_next(),
                 panel::StatusKind::Battery => {}
             }
         }
@@ -532,6 +533,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(b) = fde::status::battery() {
                 status_now.push((panel::StatusKind::Battery, fde::status::battery_label(b)));
             }
+        }
+        // the keyboard layout: a tiny file, looked at every round so a switch shows at once
+        status_now.retain(|(k, _)| *k != panel::StatusKind::KeyboardLayout);
+        if let Some(layout) = fde::kblayout::read_state() {
+            status_now.insert(0, (panel::StatusKind::KeyboardLayout, layout));
         }
         if status_now != shown_status {
             dirty = true;

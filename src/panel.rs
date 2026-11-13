@@ -232,6 +232,7 @@ pub fn draw_workspaces(buf: &mut [u8], width: i32, height: i32, s: i32, current:
 pub enum StatusKind {
     Volume,
     Network,
+    KeyboardLayout,
     Battery,
     DoNotDisturb,
 }

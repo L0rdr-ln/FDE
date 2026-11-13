@@ -84,6 +84,9 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         // send what this round produced (key presses, pointer motion, "frame shown") to the
         // programs now; without this they only got it when one of them happened to talk first
         let _ = state.display_handle.flush_clients();
+        if crate::kblayout::take_request() {
+            state.next_layout();
+        }
         if crate::shell::termination_requested() {
             tracing::info!("asked to terminate: ending the session");
             state.running = false;

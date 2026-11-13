@@ -126,6 +126,7 @@ pub fn watch_signals() {
             libc::signal(sig, on_terminate as extern "C" fn(libc::c_int) as libc::sighandler_t);
         }
     }
+    crate::kblayout::watch_signal();
 }
 
 /// Has the compositor been asked to terminate?

@@ -187,6 +187,7 @@ impl Fde {
     /// The session starts: a task bar on every monitor, then the other programs.
     pub fn start_session(&mut self) {
         self.session_started = true;
+        self.write_layout_state();
         for o in self.all_outputs() {
             if let Some(child) = crate::shell::start_panel(&self.config, &o.name()) {
                 self.panels.push((o.name(), child));

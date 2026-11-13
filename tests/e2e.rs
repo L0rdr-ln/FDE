@@ -3886,3 +3886,41 @@ fn alt_t_tiles_the_windows_side_by_side_and_again_puts_them_back() {
     assert!(hn.state.is_snapped(&windows[1]), "and the snapped one snapped");
     assert_eq!(hn.state.space.elements().cloned().collect::<Vec<_>>(), order, "and in the same order front to back");
 }
+
+#[test]
+fn with_two_keyboard_layouts_the_next_one_is_a_key_or_a_signal_away() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.write_layout_state();
+    assert_eq!(fde::kblayout::read_state(), None, "one layout: the task bar shows none");
+
+    state.config.input.keyboard_layout = "us,de".into();
+    let kb = state.seat.get_keyboard().unwrap();
+    kb.set_xkb_config(&mut state, smithay::input::keyboard::XkbConfig { layout: "us,de", ..Default::default() }).unwrap();
+    assert_eq!(state.layouts(), (2, 0));
+    state.write_layout_state();
+    assert_eq!(fde::kblayout::read_state().as_deref(), Some("US"));
+
+    state.next_layout();
+    assert_eq!(state.layouts(), (2, 1), "German now");
+    assert_eq!(fde::kblayout::read_state().as_deref(), Some("DE"), "and the task bar is told");
+    assert!(state.hud.as_ref().is_some_and(|(_, t)| t == "Keyboard: DE"), "a note on the screen says so");
+    state.next_layout();
+    assert_eq!(state.layouts(), (2, 0), "after the last comes the first");
+
+    // the task bar's click: SIGUSR2 to the compositor
+    fde::kblayout::watch_signal();
+    std::env::set_var("FDE_PID", std::process::id().to_string());
+    fde::kblayout::request_next();
+    let t0 = Instant::now();
+    let mut arrived = false;
+    while !arrived && t0.elapsed() < Duration::from_secs(2) {
+        arrived = fde::kblayout::take_request();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(arrived, "the request arrived");
+    assert!(!fde::kblayout::take_request(), "once");
+}
