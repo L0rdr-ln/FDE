@@ -22,3 +22,20 @@ Browsers and chat programs share the screen through `xdg-desktop-portal`, whose 
 
 `data/fde.desktop` is a session entry for display managers (copy it to `/usr/share/wayland-sessions/`);
 it starts `start-fde`.
+
+### FDE's own login screen (greetd)
+
+`fde-greeter` is a greeter for [greetd](https://sr.ht/~kennylevinsen/greetd/): the same glass card as
+the lock screen, on every monitor, with the wallpaper behind it. It asks for the user name, then for
+what PAM asks (the password), and has greetd start `start-fde` as that user. The greeter runs inside
+a compositor of its own, `fde` started with `FDE_GREETER=1` (no task bar, no autostart; it ends when
+the greeter does). `data/greetd-fde.toml` is the greetd configuration:
+
+    sudo install -m 644 data/greetd-fde.toml /etc/greetd/config.toml
+    sudo systemctl disable gdm sddm lightdm      # whichever you have
+    sudo systemctl enable greetd
+
+The `greeter` user greetd uses must be allowed to open the GPU and input devices (install `seatd`,
+or give it the `video` and `input` groups). This part is tested against a stand-in greetd only: the
+protocol and the card are covered by tests, a real greetd on real hardware has not been tried yet.
+If the screen stays black, switch to another console (Ctrl+Alt+F3) and look at `journalctl -u greetd`.

@@ -13,6 +13,7 @@ pub mod demo;
 pub mod flyout;
 pub mod foreign_toplevel;
 pub mod gestures;
+pub mod greetd;
 pub mod hotkeys;
 pub mod icons;
 pub mod glass;

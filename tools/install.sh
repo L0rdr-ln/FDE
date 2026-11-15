@@ -28,7 +28,7 @@ else root="$(cd "$here/.." && pwd)"; bin="$root/target/release"; share="$root/as
 
 # the compositor and its programs side by side: FDE trusts its own programs only next to itself
 mkdir -p "$prefix/bin" "$prefix/share/fde/wallpapers" "$prefix/share/applications"
-for p in fde fde-panel fde-lock fde-notify fde-shot fde-settings fde-music; do
+for p in fde fde-panel fde-lock fde-greeter fde-notify fde-shot fde-settings fde-music; do
     [ -x "$bin/$p" ] && install -m 755 "$bin/$p" "$prefix/bin/$p"
 done
 install -m 755 "$here/start-fde" "$prefix/bin/start-fde" 2>/dev/null || install -m 755 "$here/../tools/start-fde" "$prefix/bin/start-fde"

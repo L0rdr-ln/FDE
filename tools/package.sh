@@ -10,7 +10,7 @@ cargo build --release --locked --workspace
 out="dist/$name"
 rm -rf "$out"
 mkdir -p "$out/bin" "$out/share/fde/wallpapers" "$out/data" "$out/docs"
-for p in fde fde-panel fde-lock fde-notify fde-shot fde-settings fde-music; do
+for p in fde fde-panel fde-lock fde-greeter fde-notify fde-shot fde-settings fde-music; do
     install -m 755 "target/release/$p" "$out/bin/$p"
 done
 strip "$out"/bin/* 2>/dev/null || true

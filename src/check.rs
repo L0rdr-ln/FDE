@@ -200,7 +200,7 @@ pub fn run_checks(sys: &Path) -> Report {
         }
     }
     let here = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf()));
-    for sibling in ["fde-panel", "fde-lock", "fde-notify", "fde-settings"] {
+    for sibling in ["fde-panel", "fde-lock", "fde-greeter", "fde-notify", "fde-settings"] {
         let found = here.as_ref().is_some_and(|d| d.join(sibling).is_file());
         if !found {
             r.add(Mark::Note, format!("{sibling} is not next to fde: build the whole workspace (cargo build --release --workspace)"));

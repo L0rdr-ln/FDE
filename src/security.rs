@@ -68,7 +68,7 @@ pub fn is_trusted(exe: &Path, own_dir: Option<&Path>, trusted: &[String]) -> boo
     // FDE's own programs, next to the compositor
     if let (Some(dir), Some(parent)) = (own_dir, exe.parent()) {
         let dir = std::fs::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-        let ours = ["fde-panel", "fde-lock", "fde-notify", "fde-shot", "fde-settings", "fde-music"];
+        let ours = ["fde-panel", "fde-lock", "fde-greeter", "fde-notify", "fde-shot", "fde-settings", "fde-music"];
         let name = exe.file_name().and_then(|n| n.to_str()).unwrap_or("");
         if parent == dir && ours.contains(&name) {
             return true;

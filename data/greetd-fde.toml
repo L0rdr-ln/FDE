@@ -1,0 +1,7 @@
+# greetd configuration for FDE's login screen: see docs/SESSION.md
+[terminal]
+vt = 1
+
+[default_session]
+command = "env FDE_GREETER=1 /usr/local/bin/fde drm"
+user = "greeter"

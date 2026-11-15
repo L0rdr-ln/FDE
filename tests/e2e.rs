@@ -632,6 +632,116 @@ fn the_lock_screen_locks_the_session_and_unlocks_with_the_right_password() {
 }
 
 #[test]
+fn the_greeter_logs_in_through_greetd() {
+    use smithay::backend::input::KeyState;
+    use smithay::input::keyboard::{FilterResult, Keycode};
+    use smithay::utils::SERIAL_COUNTER;
+    use std::io::{Read, Write};
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FDE_BUILTIN_SKY", "1");
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let mut renderer = match offscreen_renderer() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("no GL context here ({e}): greeter test skipped");
+            return;
+        }
+    };
+    // a stand-in greetd: user "alex" with password "pw"; every message is recorded
+    let sock = dir.path().join("greetd.sock");
+    let listener = std::os::unix::net::UnixListener::bind(&sock).unwrap();
+    let started = Arc::new(AtomicBool::new(false));
+    let started2 = started.clone();
+    let server = std::thread::spawn(move || {
+        let (mut stream, _) = listener.accept().unwrap();
+        let mut started_cmd = Vec::new();
+        loop {
+            let mut len = [0u8; 4];
+            if stream.read_exact(&mut len).is_err() {
+                break;
+            }
+            let mut body = vec![0u8; u32::from_ne_bytes(len) as usize];
+            stream.read_exact(&mut body).unwrap();
+            let req: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            let reply = match req["type"].as_str().unwrap() {
+                "create_session" if req["username"] == "alex" => serde_json::json!({"type": "auth_message", "auth_message_type": "secret", "auth_message": "Password: "}),
+                "create_session" => serde_json::json!({"type": "error", "error_type": "error", "description": "no such user"}),
+                "post_auth_message_response" if req["response"] == "pw" => serde_json::json!({"type": "success"}),
+                "post_auth_message_response" => serde_json::json!({"type": "error", "error_type": "auth_error", "description": "Authentication failed"}),
+                "start_session" => {
+                    started_cmd = req["cmd"].as_array().unwrap().iter().map(|c| c.as_str().unwrap().to_string()).collect();
+                    started2.store(true, Ordering::SeqCst);
+                    serde_json::json!({"type": "success"})
+                }
+                _ => serde_json::json!({"type": "success"}),
+            };
+            let out = serde_json::to_vec(&reply).unwrap();
+            stream.write_all(&(out.len() as u32).to_ne_bytes()).unwrap();
+            stream.write_all(&out).unwrap();
+            if started2.load(Ordering::SeqCst) {
+                break;
+            }
+        }
+        started_cmd
+    });
+
+    let (w, h) = (800, 600);
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (w, h).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-greeter").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let glass = Glass::new(&mut renderer).unwrap();
+    let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
+    let mut greeter = std::process::Command::new(env!("CARGO_BIN_EXE_fde-greeter"))
+        .env("WAYLAND_DISPLAY", "fde-e2e-greeter")
+        .env("GREETD_SOCK", &sock)
+        .env("FDE_GREETER_CMD", "start-fde --test")
+        .env_remove("DISPLAY")
+        .spawn()
+        .unwrap();
+    let type_key = |hn: &mut Harness, code: u32| {
+        let kb = hn.state.seat.get_keyboard().unwrap();
+        for st in [KeyState::Pressed, KeyState::Released] {
+            kb.input::<(), _>(&mut hn.state, Keycode::new(code + 8), st, SERIAL_COUNTER.next_serial(), 0, |_, _, _| FilterResult::Forward);
+        }
+        hn.pump();
+    };
+    // keys typed before the greeter has the keyboard are lost, and a stage may be out of step:
+    // type the whole login again (Escape clears the field) until greetd has started the session
+    let t0 = Instant::now();
+    while !started.load(Ordering::SeqCst) {
+        assert!(t0.elapsed() < Duration::from_secs(60), "the login never reached start_session");
+        for code in [1u32, 30, 38, 18, 45, 28] {
+            type_key(&mut hn, code); // Esc, a l e x, Enter
+            hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(150));
+        for code in [1u32, 25, 17, 28] {
+            type_key(&mut hn, code); // Esc, p w, Enter
+            hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(300));
+        hn.pump();
+    }
+    assert_eq!(server.join().unwrap(), vec!["start-fde".to_string(), "--test".to_string()]);
+    let t0 = Instant::now();
+    loop {
+        if let Some(status) = greeter.try_wait().unwrap() {
+            assert!(status.success(), "the greeter ends cleanly after the login");
+            break;
+        }
+        assert!(t0.elapsed() < Duration::from_secs(10), "the greeter should exit");
+        hn.pump();
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
 fn a_notification_sent_over_dbus_appears_as_a_bubble_and_goes_away() {
     use std::io::BufRead;
     use std::process::{Command, Stdio};

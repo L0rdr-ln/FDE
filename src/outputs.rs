@@ -188,6 +188,11 @@ impl Fde {
     pub fn start_session(&mut self) {
         self.session_started = true;
         self.write_layout_state();
+        if crate::shell::greeter_mode() {
+            crate::shell::start_greeter();
+            self.write_outputs_state();
+            return;
+        }
         for o in self.all_outputs() {
             if let Some(child) = crate::shell::start_panel(&self.config, &o.name()) {
                 self.panels.push((o.name(), child));

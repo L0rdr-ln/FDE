@@ -155,3 +155,24 @@ mod tests {
         assert_eq!(std::env::var("FDE_PID").unwrap(), std::process::id().to_string());
     }
 }
+
+/// `FDE_GREETER=1`: this compositor is the login screen's (started by greetd), not a session.
+pub fn greeter_mode() -> bool {
+    std::env::var_os("FDE_GREETER").is_some()
+}
+
+/// Start `fde-greeter` and end the compositor (SIGTERM to ourselves, which `watch_signals` turns
+/// into a clean exit) when it is done: greetd then starts the user's session.
+pub fn start_greeter() {
+    let path = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|d| d.join("fde-greeter")));
+    match path.filter(|p| p.exists()).map(|p| Command::new(p).spawn()) {
+        Some(Ok(mut child)) => {
+            std::thread::spawn(move || {
+                let _ = child.wait();
+                unsafe { libc::kill(libc::getpid(), libc::SIGTERM) };
+            });
+        }
+        Some(Err(e)) => tracing::error!("cannot start fde-greeter: {e}"),
+        None => tracing::error!("fde-greeter is not installed next to the compositor"),
+    }
+}
