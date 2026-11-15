@@ -47,8 +47,22 @@ pub fn keyboard(layout: &str, repeat_rate: u32, repeat_delay: u32) -> Vec<(&'sta
     ]
 }
 
-pub fn shell(terminal: &str, launcher: &str, panel: bool, remember_windows: bool) -> Vec<(&'static str, Setting)> {
+/// The names of the pinned programs from what the user typed: separated by commas or spaces, each
+/// once, `.desktop` dropped.
+pub fn pinned_programs(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for name in text.split(|c: char| c == ',' || c.is_whitespace()).filter(|n| !n.is_empty()) {
+        let name = name.strip_suffix(".desktop").unwrap_or(name).to_string();
+        if !out.contains(&name) {
+            out.push(name);
+        }
+    }
+    out
+}
+
+pub fn shell(terminal: &str, launcher: &str, panel: bool, remember_windows: bool, pinned: &str) -> Vec<(&'static str, Setting)> {
     vec![
+        ("shell.pinned", Setting::List(pinned_programs(pinned))),
         ("shell.terminal", Setting::Str(terminal.trim().to_string())),
         ("shell.launcher", Setting::Str(launcher.trim().to_string())),
         ("shell.panel", Setting::Bool(panel)),
@@ -188,7 +202,7 @@ mod tests {
         let f = dir.path().join("fde.toml");
         set(&f, &appearance(&hex_color(1.0, 0.5, 0.0), 0.61234, 4, 0.5, false)).unwrap();
         set(&f, &keyboard(" de ", 30, 400)).unwrap();
-        set(&f, &shell("alacritty", "", false, true)).unwrap();
+        set(&f, &shell("alacritty", "", false, true, "firefox, org.gnome.Nautilus.desktop firefox")).unwrap();
         set(&f, &session(10, 3, 6)).unwrap();
         set(&f, &music(true, " /home/me/Music ", 0.456, true)).unwrap();
         set(&f, &wallpaper(" /tmp/a.png ", "tile")).unwrap();
@@ -197,6 +211,7 @@ mod tests {
         assert_eq!((c.appearance.transparency, c.appearance.blur, c.appearance.gloss, c.appearance.animations), (0.61, 4, 0.5, false));
         assert_eq!((c.input.keyboard_layout.as_str(), c.input.repeat_rate, c.input.repeat_delay), ("de", 30, 400));
         assert_eq!((c.shell.terminal.as_str(), c.shell.panel), ("alacritty", false));
+        assert_eq!(c.shell.pinned, ["firefox", "org.gnome.Nautilus"], "the pinned programs, each once, without .desktop");
         assert_eq!(c.session.idle_lock_seconds, 600);
         assert_eq!((c.session.dim_seconds, c.session.screen_off_seconds), (180, 360));
         assert_eq!((c.music.enabled, c.music.path.as_str(), c.music.volume, c.music.shuffle), (true, "/home/me/Music", 0.46, true));

@@ -459,11 +459,14 @@ fn shell_page(cfg: &Config, status: &Status) -> GBox {
     let remember = gtk4::Switch::new();
     remember.set_active(cfg.shell.remember_windows);
     remember.set_halign(Align::Start);
-    let (t2, l2, p2, r2, s2) = (terminal.clone(), launcher.clone(), panel.clone(), remember.clone(), status.clone());
+    let pinned = gtk4::Entry::new();
+    pinned.set_text(&cfg.shell.pinned.join(", "));
+    pinned.set_placeholder_text(Some("e.g. firefox, org.gnome.Nautilus (right-click a window's title bar to pin it)"));
+    let (t2, l2, p2, r2, n2, s2) = (terminal.clone(), launcher.clone(), panel.clone(), remember.clone(), pinned.clone(), status.clone());
     let save = debounced(move || {
-        s2.report(config::set(&path(), &model::shell(&t2.text(), &l2.text(), p2.is_active(), r2.is_active())));
+        s2.report(config::set(&path(), &model::shell(&t2.text(), &l2.text(), p2.is_active(), r2.is_active(), &n2.text())));
     });
-    for e in [&terminal, &launcher] {
+    for e in [&terminal, &launcher, &pinned] {
         let s = save.clone();
         e.connect_changed(move |_| s());
     }
@@ -475,6 +478,7 @@ fn shell_page(cfg: &Config, status: &Status) -> GBox {
     body.append(&row("Start orb runs", &launcher));
     body.append(&row("Task bar", &panel));
     body.append(&row("Open windows where they were", &remember));
+    body.append(&row("Pinned to the task bar", &pinned));
     let note = Label::new(Some("The task bar starts and stops with the next session."));
     note.add_css_class("hint");
     note.set_halign(Align::Start);

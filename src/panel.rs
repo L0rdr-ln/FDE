@@ -23,6 +23,83 @@ pub struct Task {
     pub minimized: bool,
     /// the program's icon, `TASK_ICON` logical pixels at the bar's scale
     pub icon: Option<crate::icons::Icon>,
+    /// how many windows the program has (a number on the button when more than one)
+    pub windows: usize,
+    /// pinned to the bar and not running: only its icon, no tile
+    pub idle: bool,
+}
+
+/// What the task bar knows of one window.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WinInfo {
+    pub app_id: String,
+    pub title: String,
+    pub active: bool,
+    pub minimized: bool,
+}
+
+/// One button of the bar: a program with its windows (none: pinned and not running).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Group {
+    /// the installed program (an index into the list of apps), if it is one
+    pub app: Option<usize>,
+    /// the windows of it, as indexes into the list given to `group_windows`
+    pub windows: Vec<usize>,
+    pub pinned: bool,
+}
+
+/// The buttons of the bar: the pinned programs first, in the order pinned (running or not), then
+/// the other programs in the order their first window came. Windows of one program share a button.
+pub fn group_windows(windows: &[WinInfo], apps: &[crate::apps::App], pinned: &[String]) -> Vec<Group> {
+    // a window that is not an installed program (or names no program) is a button of its own
+    let mut groups: Vec<(Group, Option<String>)> = Vec::new();
+    for name in pinned {
+        if let Some(i) = crate::apps::index_for_pinned(apps, name) {
+            if !groups.iter().any(|(g, _)| g.app == Some(i)) {
+                groups.push((Group { app: Some(i), windows: Vec::new(), pinned: true }, None));
+            }
+        }
+    }
+    for (w, win) in windows.iter().enumerate() {
+        let app = crate::apps::index_for_window(apps, &win.app_id);
+        let by_name = if app.is_none() && !win.app_id.is_empty() { Some(win.app_id.to_lowercase()) } else { None };
+        let found = groups.iter_mut().find(|(g, name)| match (app, &by_name) {
+            (Some(i), _) => g.app == Some(i),
+            (None, Some(n)) => g.app.is_none() && name.as_ref() == Some(n),
+            _ => false,
+        });
+        match found {
+            Some((g, _)) => g.windows.push(w),
+            None => groups.push((Group { app, windows: vec![w], pinned: false }, by_name)),
+        }
+    }
+    groups.into_iter().map(|(g, _)| g).collect()
+}
+
+impl Group {
+    /// The button as `draw` wants it (without its icon).
+    pub fn task(&self, windows: &[WinInfo], apps: &[crate::apps::App]) -> Task {
+        let mine: Vec<&WinInfo> = self.windows.iter().filter_map(|&w| windows.get(w)).collect();
+        let title = mine.first().map(|w| w.title.clone()).filter(|t| !t.is_empty()).or_else(|| self.app.and_then(|i| apps.get(i)).map(|a| a.name.clone())).unwrap_or_default();
+        Task {
+            title,
+            active: mine.iter().any(|w| w.active),
+            minimized: !mine.is_empty() && mine.iter().all(|w| w.minimized),
+            icon: None,
+            windows: mine.len(),
+            idle: mine.is_empty(),
+        }
+    }
+
+    /// The lines of the tooltip: the title of each window, or the program's name when none is open.
+    pub fn tooltip(&self, windows: &[WinInfo], apps: &[crate::apps::App]) -> Vec<String> {
+        let titles: Vec<String> = self.windows.iter().filter_map(|&w| windows.get(w)).map(|w| if w.title.is_empty() { "(untitled)".to_string() } else { w.title.clone() }).collect();
+        if titles.is_empty() {
+            vec![self.app.and_then(|i| apps.get(i)).map(|a| a.name.clone()).unwrap_or_default()]
+        } else {
+            titles
+        }
+    }
 }
 
 /// Size of the icons on the task buttons (logical pixels).
@@ -186,7 +263,7 @@ pub fn draw(text: &mut TextRenderer, width: i32, height: i32, s: i32, hover: boo
         }
         let (x0, x1, y0, y1) = (lx0 * s, lx1 * s, ly0 * s, ly1 * s);
         let rad = 7.0f32 * sf;
-        for y in y0..y1 {
+        for y in if task.idle { 0..0 } else { y0..y1 } {
             for x in x0..x1 {
                 let dx = (x as f32 + 0.5 - (x0 + x1) as f32 / 2.0).abs() - ((x1 - x0) as f32 / 2.0 - rad);
                 let dy = (y as f32 + 0.5 - (y0 + y1) as f32 / 2.0).abs() - ((y1 - y0) as f32 / 2.0 - rad);
@@ -226,6 +303,33 @@ pub fn draw(text: &mut TextRenderer, width: i32, height: i32, s: i32, hover: boo
                     blit(&mut buf, width, height, &img, x0 + ((x1 - x0) - img.width) / 2, (height - img.height) / 2);
                 }
             }
+        }
+    }
+    // a number on the button of a program with more than one window
+    for (i, task) in tasks.iter().enumerate() {
+        if task.windows < 2 {
+            continue;
+        }
+        let (_, lx1, _, ly1) = task_rect(i, tasks.len(), width / s, height / s);
+        let (cx, cy, r) = ((lx1 - 9) as f32 * sf, (ly1 - 9) as f32 * sf, 7.0 * sf);
+        for y in (cy - r - 2.0) as i32..(cy + r + 2.0) as i32 {
+            for x in (cx - r - 2.0) as i32..(cx + r + 2.0) as i32 {
+                if x < 0 || y < 0 || x >= width || y >= height {
+                    continue;
+                }
+                let d = ((x as f32 + 0.5 - cx).powi(2) + (y as f32 + 0.5 - cy).powi(2)).sqrt();
+                let cover = (r + 0.5 - d).clamp(0.0, 1.0);
+                if cover > 0.0 {
+                    let idx = ((y * width + x) * 4) as usize;
+                    blend(&mut buf[idx..idx + 4], pal.light(0.1), 0.97 * cover);
+                    if d > r - 1.2 * sf {
+                        blend(&mut buf[idx..idx + 4], pal.dark(0.7), 0.8 * cover);
+                    }
+                }
+            }
+        }
+        if let Some(img) = text.line(&task.windows.to_string(), 24 * s, 10.0 * sf, [255, 255, 255], Some(([0, 30, 70], 0.7)), s) {
+            blit(&mut buf, width, height, &img, cx as i32 - img.width / 2, cy as i32 - img.height / 2);
         }
     }
     // the clock (and under it the date), in the dark ink with a white glow, at the right
@@ -685,6 +789,81 @@ mod tests {
         assert_eq!(seen.len(), 5);
         assert_eq!(power_at(5.0, 5.0), None);
         assert_eq!(menu_row_at((h - 20) as f64, menu_max_rows()), None, "the power row is not a program row");
+    }
+
+    #[test]
+    fn windows_share_a_button_with_their_program_and_pinned_programs_come_first() {
+        use crate::apps::App;
+        let app = |id: &str, name: &str, exec: &str| App { id: id.into(), name: name.into(), exec: exec.into(), ..Default::default() };
+        let apps = vec![app("firefox", "Firefox", "firefox"), app("foot", "Foot", "foot"), app("org.gnome.Files", "Files", "nautilus")];
+        let win = |id: &str, title: &str, active: bool, minimized: bool| WinInfo { app_id: id.into(), title: title.into(), active, minimized };
+        let windows = vec![
+            win("foot", "~", false, true),
+            win("firefox", "Home", false, false),
+            win("foot", "htop", true, false),
+            win("mystery", "X", false, false),
+            win("mystery", "Y", false, false),
+            win("", "a", false, false),
+            win("", "b", false, false),
+        ];
+        let pinned = vec!["files".to_string(), "firefox".to_string(), "not-installed".to_string(), "FILES".to_string()];
+        let groups = group_windows(&windows, &apps, &pinned);
+        let shape: Vec<(Option<usize>, Vec<usize>, bool)> = groups.iter().map(|g| (g.app, g.windows.clone(), g.pinned)).collect();
+        assert_eq!(
+            shape,
+            vec![
+                (Some(2), vec![], true),      // Files: pinned, not running
+                (Some(0), vec![1], true),     // Firefox: pinned and running
+                (Some(1), vec![0, 2], false), // Foot: two windows, one button
+                (None, vec![3, 4], false),    // an unknown program's windows share one by its name
+                (None, vec![5], false),       // windows that name nothing are a button each
+                (None, vec![6], false),
+            ],
+            "a program not installed is not pinned, and one pinned twice is shown once"
+        );
+        let foot = groups[2].task(&windows, &apps);
+        assert_eq!((foot.windows, foot.active, foot.minimized, foot.idle, foot.title.as_str()), (2, true, false, false, "~"), "lit if any window is, faint only if all are minimized");
+        let files = groups[0].task(&windows, &apps);
+        assert_eq!((files.windows, files.idle, files.title.as_str()), (0, true, "Files"), "a pinned program that is not running shows its name");
+        assert_eq!(groups[2].tooltip(&windows, &apps), vec!["~", "htop"]);
+        assert_eq!(groups[0].tooltip(&windows, &apps), vec!["Files"]);
+        assert_eq!(groups[4].tooltip(&windows, &apps), vec!["a"]);
+    }
+
+    #[test]
+    fn a_pinned_idle_program_is_only_an_icon_and_a_second_window_adds_a_number() {
+        let mut text = TextRenderer::default();
+        let (w, h) = (400, HEIGHT);
+        let icon = crate::icons::Icon { size: TASK_ICON, rgba: vec![255; (TASK_ICON * TASK_ICON * 4) as usize] };
+        let tasks = [
+            Task { title: "A".into(), icon: Some(icon.clone()), idle: true, ..Default::default() },
+            Task { title: "B".into(), icon: Some(icon.clone()), windows: 1, ..Default::default() },
+            Task { title: "C".into(), icon: Some(icon), windows: 3, ..Default::default() },
+        ];
+        let buf = draw(&mut text, w, h, 1, false, "12:34", &tasks);
+        let at = |x: i32, y: i32| {
+            let i = ((y * w + x) * 4) as usize;
+            [buf[i] as i32, buf[i + 1] as i32, buf[i + 2] as i32]
+        };
+        let corner = |i: usize| {
+            let (x0, _, y0, _) = task_rect(i, 3, w, h);
+            at(x0 + 2, y0 + 9) // inside the tile's rounded corner area, away from the icon
+        };
+        let bar_at = |i: usize| {
+            let (_, _, y0, _) = task_rect(i, 3, w, h);
+            at(300, y0 + 9)
+        };
+        let bar = bar_at(0);
+        assert!((corner(0)[0] - bar[0]).abs() < 8, "an idle pinned program has no tile: {:?} {:?}", corner(0), bar);
+        assert!(corner(1)[0] > bar[0] + 8, "a running one does: {:?} {:?}", corner(1), bar);
+        // the badge of the third sits at its lower right corner and is lighter than the tile there
+        let (_, x1, _, y1) = task_rect(2, 3, w, h);
+        let badge = at(x1 - 9, y1 - 9);
+        let plain = {
+            let (_, x1b, _, y1b) = task_rect(1, 3, w, h);
+            at(x1b - 9, y1b - 9)
+        };
+        assert_ne!(badge, plain, "a number marks a program with several windows");
     }
 
     #[test]

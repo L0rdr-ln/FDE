@@ -4806,3 +4806,105 @@ fn the_notification_history_opens_from_the_bar_counts_as_read_and_can_be_cleared
     let _ = panel.wait();
     assert!(fde::notify::read_history().is_empty(), "Clear all emptied the history");
 }
+
+#[test]
+fn a_pinned_program_has_a_button_that_starts_it_and_its_windows_share_that_button() {
+    use smithay::wayland::seat::WaylandFocus;
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FDE_BUILTIN_SKY", "1");
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let mut renderer = match offscreen_renderer() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("no GL context here ({e}): pinned test skipped");
+            return;
+        }
+    };
+    // a made-up program, "pinme", pinned in the configuration
+    let home = dir.path().join("home");
+    let apps = home.join(".local/share/applications");
+    std::fs::create_dir_all(&apps).unwrap();
+    let marker = dir.path().join("started-pinme");
+    std::fs::write(apps.join("pinme.desktop"), format!("[Desktop Entry]\nType=Application\nName=Pinme Test\nExec=touch {}\n", marker.display())).unwrap();
+    let config = dir.path().join("fde.toml");
+    std::fs::write(&config, "[shell]\npinned = [\"pinme\"]\n").unwrap();
+
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-pinned").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let glass = Glass::new(&mut renderer).unwrap();
+    let mut scene: GlesTexture = create_scene(&mut renderer, (800, 600).into()).unwrap();
+    let mut panel = std::process::Command::new(env!("CARGO_BIN_EXE_fde-panel"))
+        .env("WAYLAND_DISPLAY", "fde-e2e-pinned")
+        .env("HOME", &home)
+        .env("FDE_CONFIG", &config)
+        .env_remove("DISPLAY")
+        .spawn()
+        .unwrap();
+    hn.pump_for(800);
+
+    // tile detection: inside the corner of button 0 (x 50..96) and of button 1 (x 100..146)
+    let (tile0, tile1, bar) = ((53, 574), (103, 574), (300, 574));
+    let apart = |a: [i32; 3], b: [i32; 3]| (a[0] - b[0]).abs() + (a[1] - b[1]).abs() + (a[2] - b[2]).abs();
+    let look = |hn: &mut Harness, renderer: &mut smithay::backend::renderer::gles::GlesRenderer, glass: &Glass, scene: &mut GlesTexture| {
+        let p = probe_scene(hn, renderer, glass, scene, &[tile0, tile1, bar]);
+        (apart(p[0], p[2]), apart(p[1], p[2]))
+    };
+
+    // pinned, not running: a button with an icon (a letter) but no tile
+    let (t0, _) = look(&mut hn, &mut renderer, &glass, &mut scene);
+    assert!(t0 < 12, "a pinned program that is not running has no tile: {t0}");
+    // a click starts it
+    assert!(!marker.exists());
+    click(&mut hn, 73.0, 580.0);
+    let t0 = Instant::now();
+    while !marker.exists() && t0.elapsed() < Duration::from_secs(5) {
+        hn.pump();
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(marker.exists(), "a click on the pinned button started the program");
+
+    // two windows of the program: one button between them, now with a tile
+    let mut windows = Vec::new();
+    for _ in 0..2 {
+        let (tx, _rx) = mpsc::channel();
+        let path = dir.path().join("fde-e2e-pinned");
+        std::thread::spawn(move || named_client(path, tx, "pinme", 200, 120));
+        let t0 = Instant::now();
+        while hn.state.space.elements().count() < windows.len() + 1 && t0.elapsed() < Duration::from_secs(10) {
+            hn.pump();
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        hn.pump_for(150);
+        windows.push(hn.state.space.elements().last().cloned().unwrap());
+    }
+    let t0 = Instant::now();
+    let mut grouped = (0, 0);
+    while t0.elapsed() < Duration::from_secs(8) {
+        grouped = look(&mut hn, &mut renderer, &glass, &mut scene);
+        if grouped.0 > 12 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(grouped.0 > 12, "the program's windows lit its button: {grouped:?}");
+    assert!(grouped.1 < 12, "and there is no second button for the second window: {grouped:?}");
+
+    // clicks on the button go round the windows
+    let focus = |hn: &Harness| hn.state.seat.get_keyboard().and_then(|k| k.current_focus());
+    let first = focus(&hn);
+    click(&mut hn, 73.0, 580.0);
+    let t0 = Instant::now();
+    while focus(&hn) == first && t0.elapsed() < Duration::from_secs(5) {
+        hn.pump();
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let second = focus(&hn);
+    assert_ne!(second, first, "a click brought the other window forward");
+    assert!(windows.iter().any(|w| w.wl_surface().map(|s| s.into_owned()) == second), "to one of the program's windows");
+    let _ = panel.kill();
+    let _ = panel.wait();
+}

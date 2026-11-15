@@ -35,6 +35,8 @@ struct App {
     toplevels: Vec<Toplevel>,
     tasks_changed: bool,
     click_task: Option<usize>,
+    /// how many buttons the task list has now (a button is a program with its windows)
+    task_count: usize,
     status_rects: Vec<(panel::StatusKind, i32, i32)>,
     click_status: Option<panel::StatusKind>,
     scroll_status: Option<(panel::StatusKind, i32)>,
@@ -316,7 +318,7 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                 } else if app.pointer.0 as i32 >= app.size.0 - panel::CLOCK_HIT_WIDTH {
                     app.click_clock = true;
                 } else {
-                    app.click_task = panel::task_at(app.pointer.0, app.pointer.1, app.size.0, app.size.1, app.toplevels.len());
+                    app.click_task = panel::task_at(app.pointer.0, app.pointer.1, app.size.0, app.size.1, app.task_count);
                 }
             }
             wl_pointer::Event::Button { state: WEnum::Value(wl_pointer::ButtonState::Released), .. } => {
@@ -370,7 +372,7 @@ fn pointer_moved(app: &mut App, n_menu: usize) {
             app.hover = hover;
             app.hover_changed = true;
         }
-        app.hover_task = panel::task_at(app.pointer.0, app.pointer.1, app.size.0, app.size.1, app.toplevels.len());
+        app.hover_task = panel::task_at(app.pointer.0, app.pointer.1, app.size.0, app.size.1, app.task_count);
     }
 }
 
@@ -651,8 +653,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tip_since: Option<(usize, Instant)> = None;
     let wifi_inbox: Arc<Mutex<Option<Vec<fde::status::WifiNet>>>> = Arc::default();
 
+    let mut pinned: Vec<String> = fde::config::Config::load().map(|c| c.shell.pinned).unwrap_or_default();
+    let mut pinned_checked = Instant::now();
+
     while !app.closed {
         let mut want: Option<(FlyoutKind, i32)> = None;
+        // the programs pinned to the bar may be changed in the settings or from a window's menu
+        if pinned_checked.elapsed() >= Duration::from_secs(2) {
+            pinned_checked = Instant::now();
+            let now = fde::config::Config::load().map(|c| c.shell.pinned).unwrap_or_default();
+            if now != pinned {
+                pinned = now;
+                dirty = true;
+            }
+        }
+        // the buttons: a program with all its windows, the pinned ones first
+        let infos: Vec<panel::WinInfo> = app
+            .toplevels
+            .iter()
+            .map(|t| panel::WinInfo { app_id: t.app_id.clone(), title: t.task.title.clone(), active: t.task.active, minimized: t.task.minimized })
+            .collect();
+        let groups = panel::group_windows(&infos, &entries, &pinned);
+        if groups.len() != app.task_count {
+            app.task_count = groups.len();
+            dirty = true;
+        }
         if last_clock.elapsed() >= Duration::from_secs(10) {
             current_clock = clock();
             last_clock = Instant::now();
@@ -662,11 +687,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             dirty = true;
         }
         if let Some(i) = app.click_task.take() {
-            if let (Some(t), Some(seat)) = (app.toplevels.get(i), app.seat.as_ref()) {
-                if t.task.active && !t.task.minimized {
-                    t.handle.set_minimized();
-                } else {
-                    t.handle.activate(seat);
+            if let Some(g) = groups.get(i) {
+                match g.windows.len() {
+                    // pinned and not running: start it
+                    0 => {
+                        if let Some(a) = g.app.and_then(|k| entries.get(k)) {
+                            launch_exec(&a.exec);
+                        }
+                    }
+                    // one window: raise it, or minimize it when it is the one in front
+                    1 => {
+                        if let (Some(t), Some(seat)) = (app.toplevels.get(g.windows[0]), app.seat.as_ref()) {
+                            if t.task.active && !t.task.minimized {
+                                t.handle.set_minimized();
+                            } else {
+                                t.handle.activate(seat);
+                            }
+                        }
+                    }
+                    // several: the one after the one in front comes forward, so a click goes round
+                    n => {
+                        let front = g.windows.iter().position(|&w| infos[w].active && !infos[w].minimized);
+                        let next = g.windows[front.map(|p| (p + 1) % n).unwrap_or(0)];
+                        if let (Some(t), Some(seat)) = (app.toplevels.get(next), app.seat.as_ref()) {
+                            t.handle.activate(seat);
+                        }
+                    }
                 }
             }
         }
@@ -733,10 +779,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if dirty {
             size = app.size;
             let s_now = app.scale.current();
-            let tasks: Vec<panel::Task> = app
-                .toplevels
+            let tasks: Vec<panel::Task> = groups
                 .iter()
-                .map(|t| panel::Task { icon: window_icon(&mut icons, &entries, &t.app_id, panel::TASK_ICON * s_now), ..t.task.clone() })
+                .map(|g| {
+                    // a program's icon by its first window's name, or by the pinned program's own
+                    let id = g.windows.first().map(|&w| infos[w].app_id.clone()).or_else(|| g.app.and_then(|k| entries.get(k)).map(|a| a.id.clone())).unwrap_or_default();
+                    panel::Task { icon: window_icon(&mut icons, &entries, &id, panel::TASK_ICON * s_now), ..g.task(&infos, &entries) }
+                })
                 .collect();
             let s = app.scale.current();
             let room_before = panel::right_room();
@@ -750,9 +799,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             attach(&shm, &qh, &surface, &mut file, rgba, (size.0 * s, size.1 * s), s)?;
             shown_scale = s;
             // tell the compositor where each window's button is: minimizing shrinks towards it
-            for (i, t) in app.toplevels.iter().enumerate() {
+            for (i, g) in groups.iter().enumerate() {
                 let (x0, x1, y0, y1) = panel::task_rect(i, tasks.len(), size.0, size.1);
-                t.handle.set_rectangle(&surface, x0, y0, x1 - x0, y1 - y0);
+                for &w in &g.windows {
+                    if let Some(t) = app.toplevels.get(w) {
+                        t.handle.set_rectangle(&surface, x0, y0, x1 - x0, y1 - y0);
+                    }
+                }
             }
             shown = current_clock.clone();
             shown_hover = app.hover;
@@ -975,8 +1028,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         if tooltip_open.is_some_and(|j| j != i) {
                             app.close_flyout = true;
-                        } else if tooltip_open.is_none() && want.is_none() && tip_since.is_some_and(|(_, t)| t.elapsed() >= Duration::from_millis(350)) && app.toplevels.get(i).is_some() {
-                            let (x0, x1, _, _) = panel::task_rect(i, app.toplevels.len(), app.size.0, app.size.1);
+                        } else if tooltip_open.is_none() && want.is_none() && tip_since.is_some_and(|(_, t)| t.elapsed() >= Duration::from_millis(350)) && groups.get(i).is_some() {
+                            let (x0, x1, _, _) = panel::task_rect(i, groups.len(), app.size.0, app.size.1);
                             want = Some((FlyoutKind::Tooltip(i), (x0 + x1) / 2));
                         }
                     }
@@ -1003,10 +1056,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     app.close_flyout = false;
                     app.flyout_configured = false;
                     let content = match kind {
-                        FlyoutKind::Tooltip(i) => {
-                            let t = app.toplevels.get(i).map(|t| t.task.title.clone()).unwrap_or_default();
-                            Flyout::Tooltip(vec![if t.is_empty() { "(untitled)".to_string() } else { t }])
-                        }
+                        FlyoutKind::Tooltip(i) => Flyout::Tooltip(groups.get(i).map(|g| g.tooltip(&infos, &entries)).unwrap_or_default()),
                         FlyoutKind::Volume => {
                             let v = fde::status::volume();
                             Flyout::Volume { percent: v.map(|v| v.percent).unwrap_or(0), muted: v.is_some_and(|v| v.muted) }

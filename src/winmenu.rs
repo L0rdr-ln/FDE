@@ -17,6 +17,8 @@ pub enum MenuItem {
     Maximize,
     Restore,
     OnTop(bool),
+    /// pin the window's program to the task bar (true: it is pinned now, so this unpins)
+    Pin(bool),
     ToWorkspace(usize),
     Close,
 }
@@ -29,6 +31,8 @@ impl MenuItem {
             MenuItem::Restore => "Restore".into(),
             MenuItem::OnTop(true) => "✓ Always on top".into(),
             MenuItem::OnTop(false) => "Always on top".into(),
+            MenuItem::Pin(false) => "Pin to task bar".into(),
+            MenuItem::Pin(true) => "Unpin from task bar".into(),
             MenuItem::ToWorkspace(n) => format!("Move to workspace {}", n + 1),
             MenuItem::Close => "Close".into(),
         }
@@ -41,6 +45,8 @@ pub struct WindowMenu {
     /// top left corner, in the shared space
     pub at: Point<i32, Logical>,
     pub items: Vec<MenuItem>,
+    /// the desktop file name of the window's program, for Pin
+    pub pin_id: Option<String>,
     /// the row under the pointer or chosen with the arrow keys
     pub hover: Option<usize>,
 }
@@ -76,6 +82,9 @@ impl Fde {
         let mut items = vec![MenuItem::Minimize];
         items.push(if self.is_maximized(window) { MenuItem::Restore } else { MenuItem::Maximize });
         items.push(MenuItem::OnTop(self.is_on_top(window)));
+        if let Some((_, pinned)) = self.pin_target(window) {
+            items.push(MenuItem::Pin(pinned));
+        }
         let here = self.window_workspace_of(window);
         for n in 0..self.workspace_count() {
             if n != here {
@@ -92,7 +101,8 @@ impl Fde {
             return;
         }
         let items = self.window_menu_items(window);
-        let mut menu = WindowMenu { window: window.clone(), at: p.to_i32_round(), items, hover: None };
+        let pin_id = self.pin_target(window).map(|(id, _)| id);
+        let mut menu = WindowMenu { window: window.clone(), at: p.to_i32_round(), items, pin_id, hover: None };
         if let Some(out) = self.output_at(p) {
             let r = self.output_rect(&out);
             let size = menu.rect().size;
@@ -114,6 +124,10 @@ impl Fde {
         let Some(menu) = self.window_menu.take() else { return };
         self.request_redraw();
         let Some(item) = menu.items.get(i).copied() else { return };
+        if let (MenuItem::Pin(was), Some(id)) = (item, menu.pin_id.as_deref()) {
+            self.set_pinned(id, !was);
+            return;
+        }
         let w = menu.window;
         if !self.space.elements().any(|e| *e == w) {
             return; // gone meanwhile
@@ -123,6 +137,7 @@ impl Fde {
             MenuItem::Maximize => self.set_maximized(&w, true),
             MenuItem::Restore => self.set_maximized(&w, false),
             MenuItem::OnTop(on) => self.set_on_top(&w, !on),
+            MenuItem::Pin(_) => {}
             MenuItem::ToWorkspace(n) => self.move_window_to_workspace(&w, n),
             MenuItem::Close => self.close_window(&w),
         }
@@ -164,6 +179,34 @@ impl Fde {
         let n = menu.items.len() as i32;
         let cur = menu.hover.map(|h| h as i32).unwrap_or(if step > 0 { -1 } else { n });
         menu.hover = Some((cur + step).rem_euclid(n) as usize);
+        self.request_redraw();
+    }
+
+    /// The desktop file name of the window's program, and whether it is pinned to the task bar now
+    /// (None when it is not an installed program).
+    pub fn pin_target(&self, window: &Window) -> Option<(String, bool)> {
+        let app_id = crate::placement::app_id(window)?;
+        let apps = crate::apps::installed();
+        let i = crate::apps::index_for_window(&apps, &app_id)?;
+        let pinned = self.config.shell.pinned.iter().any(|n| crate::apps::index_for_pinned(&apps, n) == Some(i));
+        Some((apps[i].id.clone(), pinned))
+    }
+
+    /// Pin a program to the task bar, or take it off, in the user's configuration file (the task
+    /// bar looks at it every couple of seconds).
+    pub fn set_pinned(&mut self, id: &str, pin: bool) {
+        let apps = crate::apps::installed();
+        let target = crate::apps::index_for_pinned(&apps, id);
+        let mut list: Vec<String> = self.config.shell.pinned.clone();
+        list.retain(|n| crate::apps::index_for_pinned(&apps, n) != target || target.is_none() && n != id);
+        if pin {
+            list.push(id.to_string());
+        }
+        let Some(path) = crate::config::user_path() else { return };
+        match crate::config::set(&path, &[("shell.pinned", crate::config::Setting::List(list.clone()))]) {
+            Ok(()) => self.config.shell.pinned = list,
+            Err(e) => tracing::warn!("cannot pin: {e}"),
+        }
         self.request_redraw();
     }
 

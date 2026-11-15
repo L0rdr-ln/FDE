@@ -77,18 +77,30 @@ pub fn installed() -> Vec<App> {
 
 /// The installed app a window belongs to, from the window's app id (Wayland) or class (X11):
 /// the desktop file of that name, or one that names that X11 class, or one called that.
-pub fn for_window<'a>(apps: &'a [App], app_id: &str) -> Option<&'a App> {
+pub fn index_for_window(apps: &[App], app_id: &str) -> Option<usize> {
     let id = app_id.to_lowercase();
     if id.is_empty() {
         return None;
     }
     let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_lowercase();
     apps.iter()
-        .find(|a| a.id.to_lowercase() == id)
-        .or_else(|| apps.iter().find(|a| a.wm_class.as_deref().is_some_and(|c| c.to_lowercase() == id)))
-        .or_else(|| apps.iter().find(|a| last(&a.id) == last(&id)))
-        .or_else(|| apps.iter().find(|a| a.name.to_lowercase() == id))
-        .or_else(|| apps.iter().find(|a| a.exec.split_whitespace().next().is_some_and(|e| e.rsplit('/').next().unwrap_or(e).to_lowercase() == id)))
+        .position(|a| a.id.to_lowercase() == id)
+        .or_else(|| apps.iter().position(|a| a.wm_class.as_deref().is_some_and(|c| c.to_lowercase() == id)))
+        .or_else(|| apps.iter().position(|a| last(&a.id) == last(&id)))
+        .or_else(|| apps.iter().position(|a| a.name.to_lowercase() == id))
+        .or_else(|| apps.iter().position(|a| a.exec.split_whitespace().next().is_some_and(|e| e.rsplit('/').next().unwrap_or(e).to_lowercase() == id)))
+}
+
+/// The installed program a pinned name stands for: the desktop file of that name, or one whose
+/// name ends in it ("files" for "org.gnome.Files").
+pub fn index_for_pinned(apps: &[App], name: &str) -> Option<usize> {
+    let name = name.to_lowercase();
+    let last = |s: &str| s.rsplit('.').next().unwrap_or(s).to_lowercase();
+    apps.iter().position(|a| a.id.to_lowercase() == name).or_else(|| apps.iter().position(|a| last(&a.id) == last(&name)))
+}
+
+pub fn for_window<'a>(apps: &'a [App], app_id: &str) -> Option<&'a App> {
+    index_for_window(apps, app_id).map(|i| &apps[i])
 }
 
 /// The apps whose name contains `query` (case does not matter), names that start with it first,

@@ -146,11 +146,13 @@ pub struct Shell {
     pub polkit_agent: bool,
     /// open each program's window where it was last closed
     pub remember_windows: bool,
+    /// programs that keep a button on the task bar (their desktop file names without `.desktop`)
+    pub pinned: Vec<String>,
 }
 
 impl Default for Shell {
     fn default() -> Self {
-        Shell { terminal: "foot".into(), launcher: String::new(), panel: true, autostart: Vec::new(), polkit_agent: true, remember_windows: true }
+        Shell { terminal: "foot".into(), launcher: String::new(), panel: true, autostart: Vec::new(), polkit_agent: true, remember_windows: true, pinned: Vec::new() }
     }
 }
 
