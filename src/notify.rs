@@ -133,6 +133,120 @@ pub fn set_dnd(on: bool) {
 
 /// With do-not-disturb on only critical notes are shown; the others wait quietly until it is
 /// off (or their time runs out).
+// ---------------------------------------------------------------------------- the history
+
+/// Notifications kept in the history.
+pub const HISTORY_MAX: usize = 50;
+
+/// One remembered notification.
+#[derive(Clone, Debug, PartialEq)]
+pub struct HistoryEntry {
+    /// seconds since 1970
+    pub time: u64,
+    pub app: String,
+    pub summary: String,
+    pub body: String,
+}
+
+fn runtime_file(name: &str) -> Option<std::path::PathBuf> {
+    std::env::var_os("XDG_RUNTIME_DIR").map(|d| std::path::PathBuf::from(d).join("fde").join(name))
+}
+
+pub fn history_path() -> Option<std::path::PathBuf> {
+    runtime_file("notification-history")
+}
+
+fn seen_path() -> Option<std::path::PathBuf> {
+    runtime_file("notification-seen")
+}
+
+fn escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('\t', "\\t").replace('\n', "\\n")
+}
+
+fn unescape(s: &str) -> String {
+    let mut out = String::new();
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('t') => out.push('\t'),
+                Some('n') => out.push('\n'),
+                Some(o) => out.push(o),
+                None => {}
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
+}
+
+/// A history line: `time TAB app TAB summary TAB body`, tabs and line breaks escaped.
+pub fn encode_entry(e: &HistoryEntry) -> String {
+    format!("{}\t{}\t{}\t{}", e.time, escape(&e.app), escape(&e.summary), escape(&e.body))
+}
+
+pub fn decode_entry(line: &str) -> Option<HistoryEntry> {
+    let f: Vec<&str> = line.splitn(4, '\t').collect();
+    if f.len() != 4 {
+        return None;
+    }
+    Some(HistoryEntry { time: f[0].parse().ok()?, app: unescape(f[1]), summary: unescape(f[2]), body: unescape(f[3]) })
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
+}
+
+/// Remember a notification (the last `HISTORY_MAX` are kept).
+pub fn add_history(app: &str, summary: &str, body: &str) {
+    let Some(path) = history_path() else { return };
+    let mut lines: Vec<String> = std::fs::read_to_string(&path).unwrap_or_default().lines().map(String::from).collect();
+    lines.push(encode_entry(&HistoryEntry { time: now_secs(), app: app.to_string(), summary: summary.to_string(), body: body.to_string() }));
+    if lines.len() > HISTORY_MAX {
+        lines.drain(..lines.len() - HISTORY_MAX);
+    }
+    if let Some(dir) = path.parent() {
+        let _ = std::fs::create_dir_all(dir);
+    }
+    let tmp = path.with_extension("tmp");
+    if std::fs::write(&tmp, lines.join("\n") + "\n").is_ok() {
+        let _ = std::fs::rename(&tmp, &path);
+    }
+}
+
+/// The remembered notifications, newest first.
+pub fn read_history() -> Vec<HistoryEntry> {
+    let text = history_path().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+    let mut v: Vec<HistoryEntry> = text.lines().filter_map(decode_entry).collect();
+    v.reverse();
+    v
+}
+
+pub fn clear_history() {
+    if let Some(p) = history_path() {
+        let _ = std::fs::remove_file(p);
+    }
+    mark_seen();
+}
+
+/// The user has looked at the history now.
+pub fn mark_seen() {
+    if let Some(p) = seen_path() {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(p, now_secs().to_string());
+    }
+}
+
+/// How many notifications came after the history was last looked at.
+pub fn unread_count() -> usize {
+    let seen: u64 = seen_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|t| t.trim().parse().ok()).unwrap_or(0);
+    read_history().iter().filter(|e| e.time > seen).count()
+}
+
 pub fn visible<'a>(notes: Vec<&'a Note>, dnd: bool) -> Vec<&'a Note> {
     if dnd {
         notes.into_iter().filter(|n| n.critical).collect()
@@ -280,6 +394,35 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
+    /// The tests that point XDG_RUNTIME_DIR at a folder of their own take turns.
+    static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn the_history_remembers_the_latest_notifications_newest_first() {
+        let _env = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let dir = tempfile::tempdir().unwrap();
+        std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+        assert!(read_history().is_empty() && unread_count() == 0);
+        add_history("Mail", "Hello\tthere", "line one\nline two \\ end");
+        add_history("Chat", "Second", "");
+        let h = read_history();
+        assert_eq!((h[0].app.as_str(), h[0].summary.as_str()), ("Chat", "Second"), "newest first");
+        assert_eq!((h[1].summary.as_str(), h[1].body.as_str()), ("Hello\tthere", "line one\nline two \\ end"), "tabs, line breaks and backslashes survive");
+        assert_eq!(unread_count(), 2, "nothing looked at yet");
+        std::fs::write(seen_path().unwrap(), "99999999999").unwrap();
+        assert_eq!(unread_count(), 0, "all looked at");
+        std::fs::write(seen_path().unwrap(), "0").unwrap();
+        assert_eq!(unread_count(), 2);
+        for i in 0..(HISTORY_MAX + 10) {
+            add_history("x", &format!("n{i}"), "");
+        }
+        assert_eq!(read_history().len(), HISTORY_MAX, "the oldest are dropped");
+        assert_eq!(read_history()[0].summary, format!("n{}", HISTORY_MAX + 9));
+        clear_history();
+        assert!(read_history().is_empty());
+        assert!(decode_entry("broken").is_none() && decode_entry("x\ta\tb\tc").is_none());
+    }
+
     #[test]
     fn notes_get_ids_replace_expire_and_close() {
         let t0 = Instant::now();
@@ -346,6 +489,7 @@ mod tests {
         let quiet = visible(all, true);
         assert_eq!(quiet.len(), 1);
         assert_eq!(quiet[0].summary, "Disk full");
+        let _env = ENV.lock().unwrap_or_else(|e| e.into_inner());
         let dir = tempfile::tempdir().unwrap();
         std::env::set_var("XDG_RUNTIME_DIR", dir.path());
         assert!(!dnd_on());

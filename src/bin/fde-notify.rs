@@ -53,6 +53,10 @@ impl Server {
         expire_timeout: i32,
     ) -> u32 {
         let critical = matches!(hints.get("urgency").map(|v| &**v), Some(zbus::zvariant::Value::U8(2)));
+        // remembered for the history on the task bar (an update of a notification is not new)
+        if replaces_id == 0 {
+            notify::add_history(&app_name, &notify::strip_markup(&summary), &notify::strip_markup(&body));
+        }
         self.shared.lock().unwrap().store.notify(&app_name, replaces_id, &summary, &body, expire_timeout, critical, &actions, Instant::now())
     }
 

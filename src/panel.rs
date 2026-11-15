@@ -291,6 +291,7 @@ pub fn draw_workspaces(buf: &mut [u8], width: i32, height: i32, s: i32, current:
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum StatusKind {
+    Notifications,
     Cpu,
     Memory,
     Volume,

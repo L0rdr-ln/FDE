@@ -4739,3 +4739,70 @@ fn resting_on_a_window_button_shows_its_title_in_a_tooltip_until_the_pointer_lea
     let _ = panel.wait();
     assert!(differs(&before, &gone) < 40, "the tooltip stayed: {before:?} {gone:?}");
 }
+
+#[test]
+fn the_notification_history_opens_from_the_bar_counts_as_read_and_can_be_cleared() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FDE_BUILTIN_SKY", "1");
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let mut renderer = match offscreen_renderer() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("no GL context here ({e}): history test skipped");
+            return;
+        }
+    };
+    let home = dir.path().join("home");
+    std::fs::create_dir_all(&home).unwrap();
+    // two notifications that came earlier (and a second to be sure they count as after "seen")
+    fde::notify::add_history("Mail", "New message from Alex", "Lunch at noon?");
+    fde::notify::add_history("System", "Battery is low", "");
+    std::fs::create_dir_all(dir.path().join("fde")).unwrap();
+    std::fs::write(dir.path().join("fde/notification-seen"), "0").unwrap();
+    assert_eq!(fde::notify::unread_count(), 2);
+
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (800, 600).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-history").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let glass = Glass::new(&mut renderer).unwrap();
+    let mut scene: GlesTexture = create_scene(&mut renderer, (800, 600).into()).unwrap();
+    let mut panel = std::process::Command::new(env!("CARGO_BIN_EXE_fde-panel"))
+        .env("WAYLAND_DISPLAY", "fde-e2e-history")
+        .env("HOME", &home)
+        .env_remove("DISPLAY")
+        .spawn()
+        .unwrap();
+    hn.pump_for(800);
+
+    let points = [(470, 400), (520, 440), (600, 470), (700, 400), (740, 500)];
+    let before = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &points);
+    let differs = |a: &[[i32; 3]], b: &[[i32; 3]]| a.iter().zip(b).map(|(p, q)| (p[0] - q[0]).abs() + (p[1] - q[1]).abs() + (p[2] - q[2]).abs()).sum::<i32>();
+
+    // the "Alerts 2" label is the first one left of the clock's corner (about x 640 to 688 on this screen: this test has no workspace dots)
+    click(&mut hn, 664.0, 580.0);
+    let t0 = Instant::now();
+    let mut open = before.clone();
+    while t0.elapsed() < Duration::from_secs(8) {
+        open = probe_scene(&mut hn, &mut renderer, &glass, &mut scene, &points);
+        if differs(&before, &open) > 150 {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    assert!(differs(&before, &open) > 150, "the history did not open: {before:?} {open:?}");
+    assert_eq!(fde::notify::unread_count(), 0, "opening the history reads it");
+
+    // "Clear all" is the button under the two rows
+    click(&mut hn, 600.0, 532.0);
+    let t0 = Instant::now();
+    while t0.elapsed() < Duration::from_secs(5) && !fde::notify::read_history().is_empty() {
+        hn.pump();
+        std::thread::sleep(Duration::from_millis(30));
+    }
+    let _ = panel.kill();
+    let _ = panel.wait();
+    assert!(fde::notify::read_history().is_empty(), "Clear all emptied the history");
+}

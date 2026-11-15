@@ -445,6 +445,16 @@ fn fit_menu_to_screen() {
     }
 }
 
+/// The notification history as the flyout shows it, with how long ago each came.
+fn history_items() -> Vec<flyout::HistoryItem> {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    fde::notify::read_history()
+        .into_iter()
+        .take(flyout::MAX_HISTORY)
+        .map(|e| flyout::HistoryItem { app: e.app, summary: e.summary, body: e.body, age: flyout::age_label(now.saturating_sub(e.time)) })
+        .collect()
+}
+
 /// The terminal of the configuration (or $FDE_TERMINAL).
 fn terminal() -> String {
     std::env::var("FDE_TERMINAL").unwrap_or_else(|_| fde::config::Config::load().unwrap_or_default().shell.terminal)
@@ -668,6 +678,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match kind {
                 panel::StatusKind::Volume => want = Some((FlyoutKind::Volume, center(kind))),
                 panel::StatusKind::DoNotDisturb => fde::notify::set_dnd(false),
+                panel::StatusKind::Notifications => want = Some((FlyoutKind::Notifications, center(kind))),
                 panel::StatusKind::Cpu | panel::StatusKind::Memory => {}
                 panel::StatusKind::Network => want = Some((FlyoutKind::Network, center(kind))),
                 panel::StatusKind::KeyboardLayout => fde::kblayout::request_next(),
@@ -682,6 +693,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if acted || status_checked.elapsed() >= Duration::from_secs(5) {
             status_checked = std::time::Instant::now();
             status_now.clear();
+            let unread = fde::notify::unread_count();
+            status_now.push((panel::StatusKind::Notifications, if unread > 0 { format!("Alerts {unread}") } else { "Alerts".to_string() }));
             if fde::notify::dnd_on() {
                 status_now.push((panel::StatusKind::DoNotDisturb, "DND".to_string()));
             }
@@ -884,6 +897,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             fde::status::open_network_settings(&terminal());
                             close = true;
                         }
+                        (Flyout::Notifications { dnd, .. }, Hit::Dnd) => {
+                            fde::notify::set_dnd(!*dnd);
+                            *dnd = fde::notify::dnd_on();
+                        }
+                        (Flyout::Notifications { items, .. }, Hit::ClearAll) => {
+                            fde::notify::clear_history();
+                            items.clear();
+                        }
                         (Flyout::Calendar { year, month, today }, Hit::CalPrev | Hit::CalNext | Hit::CalToday) => {
                             match h {
                                 Hit::CalPrev => (*year, *month) = flyout::shift_month(*year, *month, -1),
@@ -915,6 +936,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let (Some(v), Flyout::Volume { percent, muted }) = (fde::status::volume(), &mut f.content) {
                         if (v.percent, v.muted) != (*percent, *muted) {
                             (*percent, *muted) = (v.percent, v.muted);
+                            f.dirty = true;
+                        }
+                    }
+                }
+            }
+            // the history follows what arrives (and the quiet switch what a key did)
+            if let Some(f) = app.flyout.as_mut() {
+                if matches!(f.kind, FlyoutKind::Notifications) && f.refreshed.elapsed() >= Duration::from_secs(1) {
+                    f.refreshed = Instant::now();
+                    fde::notify::mark_seen();
+                    let (now_items, now_dnd) = (history_items(), fde::notify::dnd_on());
+                    if let Flyout::Notifications { items, dnd } = &mut f.content {
+                        if *items != now_items || *dnd != now_dnd {
+                            (*items, *dnd) = (now_items, now_dnd);
                             f.dirty = true;
                         }
                     }
@@ -993,7 +1028,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             let t = flyout::today();
                             Flyout::Calendar { year: t.0, month: t.1, today: t }
                         }
-                        FlyoutKind::Notifications => Flyout::Notifications { items: Vec::new(), dnd: fde::notify::dnd_on() },
+                        FlyoutKind::Notifications => {
+                            fde::notify::mark_seen();
+                            status_checked = Instant::now() - Duration::from_secs(10); // the count on the bar goes to 0
+                            Flyout::Notifications { items: history_items(), dnd: fde::notify::dnd_on() }
+                        }
                     };
                     let fsize = flyout::size(&content, &mut text, s);
                     let x = (anchor - fsize.0 / 2).min(app.size.0 - fsize.0 - 6).max(6);
