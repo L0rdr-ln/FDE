@@ -240,6 +240,10 @@ pub fn wifi_networks() -> Option<Vec<WifiNet>> {
 /// Connect to a network NetworkManager knows or that is open (others need a password: use the
 /// network settings).
 pub fn connect_wifi(ssid: &str) {
+    // the name comes from whoever runs an access point nearby: never let it read as an option
+    if ssid.is_empty() || ssid.starts_with('-') {
+        return;
+    }
     let _ = Command::new("nmcli").args(["--wait", "15", "dev", "wifi", "connect", ssid]).spawn();
 }
 

@@ -199,6 +199,11 @@ fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// `text` cut to at most `max` characters.
+pub fn clip(text: &str, max: usize) -> String {
+    text.chars().take(max).collect()
+}
+
 /// Remember a notification (the last `HISTORY_MAX` are kept).
 pub fn add_history(app: &str, summary: &str, body: &str) {
     let Some(path) = history_path() else { return };
@@ -516,5 +521,12 @@ mod tests {
         assert_eq!(row_at(10.0, 2), Some(0));
         assert_eq!(row_at((BUBBLE_H + GAP + 10) as f64, 2), Some(1));
         assert_eq!(row_at((BUBBLE_H + 2) as f64, 2), None);
+    }
+
+    #[test]
+    fn long_text_is_cut_by_characters() {
+        assert_eq!(clip("häßlich", 3), "häß");
+        assert_eq!(clip("ok", 200), "ok");
+        assert_eq!(clip(&"x".repeat(5000), 1000).len(), 1000);
     }
 }

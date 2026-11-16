@@ -119,7 +119,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for App {
                     app.message.clear();
                     app.redraw = true;
                 } else if sym == xkb::Keysym::Escape {
-                    app.typed.clear();
+                    lockscreen::wipe(&mut app.typed);
                     app.message.clear();
                     app.redraw = true;
                 } else {
@@ -138,7 +138,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for App {
 
 /// What greetd's answer means for the card.
 fn apply(app: &mut App, step: Step) {
-    app.typed.clear();
+    lockscreen::wipe(&mut app.typed);
     match step {
         Step::Ask { secret, prompt, notes } => {
             app.stage = Stage::Answer(secret);
@@ -206,7 +206,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         if app.submit {
             app.submit = false;
-            let typed = std::mem::take(&mut app.typed);
+            let mut typed = std::mem::take(&mut app.typed);
             let step = match app.stage {
                 Stage::Name if typed.trim().is_empty() => None,
                 Stage::Name => {
@@ -215,6 +215,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 Stage::Answer(_) => Some(greetd.answer(&typed)?),
             };
+            lockscreen::wipe(&mut typed);
             if let Some(step) = step {
                 let failed = matches!(step, Step::Failed { .. });
                 apply(&mut app, step);

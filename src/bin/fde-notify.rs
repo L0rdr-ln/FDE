@@ -52,6 +52,9 @@ impl Server {
         hints: HashMap<String, zbus::zvariant::OwnedValue>,
         expire_timeout: i32,
     ) -> u32 {
+        // any program on the session bus can send these: keep them to a size a bubble can show
+        let (app_name, summary, body) = (notify::clip(&app_name, 80), notify::clip(&summary, 200), notify::clip(&body, 1000));
+        let actions: Vec<String> = actions.iter().take(8).map(|a| notify::clip(a, 80)).collect();
         let critical = matches!(hints.get("urgency").map(|v| &**v), Some(zbus::zvariant::Value::U8(2)));
         // remembered for the history on the task bar (an update of a notification is not new)
         if replaces_id == 0 {

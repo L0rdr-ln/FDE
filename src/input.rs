@@ -118,8 +118,10 @@ impl Fde {
                         {
                             state.switcher_commit = true;
                         }
-                        // a locked session has no shortcuts besides the console switch
-                        if state.locked {
+                        // a locked session has no shortcuts besides the console switch, and the
+                        // login screen has none at all for whoever sits down at it (no terminal,
+                        // no quitting the compositor)
+                        if state.locked || state.greeter {
                             state.super_alone = false;
                             return FilterResult::Forward;
                         }

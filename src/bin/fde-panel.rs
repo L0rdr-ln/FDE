@@ -423,7 +423,9 @@ fn clock() -> String {
 /// The icon of a window's program: from its desktop file, else by its app id, else a generic one.
 fn window_icon(icons: &mut fde::icons::IconCache, apps: &[fde::apps::App], app_id: &str, px: i32) -> Option<fde::icons::Icon> {
     let app = fde::apps::for_window(apps, app_id);
-    let name = app.and_then(|a| a.icon.clone()).unwrap_or_else(|| app_id.to_lowercase());
+    // a window names itself: that name may pick an icon from the themes, never a file by path
+    let own = if app_id.contains('/') { String::new() } else { app_id.to_lowercase() };
+    let name = app.and_then(|a| a.icon.clone()).unwrap_or(own);
     let label = app.map(|a| a.name.as_str()).unwrap_or(app_id);
     icons.get(&name, px, fallback_icons(label)).cloned()
 }

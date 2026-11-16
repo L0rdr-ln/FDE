@@ -6,6 +6,9 @@
 //! owned by root and writable by nobody else). Everything else (an ordinary app, a sandboxed Flatpak, a script in
 //! your home directory) does not even see those protocols. `trusted_programs = []` and
 //! `restrict = false` are the two ways to change that.
+//!
+//! This keeps sandboxed and untrusted-by-accident programs out. It is not a wall against a program
+//! that already runs as the user outside a sandbox: such a program can start a trusted one itself.
 
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -39,16 +42,33 @@ pub const DEFAULT_TRUSTED: &[&str] = &[
     "swaync",
 ];
 
-/// The program on the other end of a client connection (from the kernel: SO_PEERCRED).
-pub fn peer_executable(stream: &std::os::unix::net::UnixStream) -> Option<PathBuf> {
+/// The process on the other end of a client connection (from the kernel: SO_PEERCRED).
+fn peer_pid(stream: &std::os::unix::net::UnixStream) -> Option<i32> {
     use std::os::fd::AsRawFd;
     let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
     let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
     let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, &mut cred as *mut _ as *mut libc::c_void, &mut len) };
-    if r != 0 || cred.pid <= 0 {
-        return None;
-    }
-    std::fs::read_link(format!("/proc/{}/exe", cred.pid)).ok()
+    (r == 0 && cred.pid > 0).then_some(cred.pid)
+}
+
+/// The program on the other end of a client connection.
+pub fn peer_executable(stream: &std::os::unix::net::UnixStream) -> Option<PathBuf> {
+    verified_executable(peer_pid(stream)?)
+}
+
+/// The program file process `pid` runs, as a path that means the same file *here*.
+///
+/// `/proc/<pid>/exe` reads as a path inside the process's own view of the file system: a
+/// program in a sandbox or a mount namespace of its own can make that say `/usr/bin/grim` while
+/// running something else entirely. So the file behind the link (which the kernel resolves to
+/// the real file, whatever the process sees) must be the very file that path names for us:
+/// the same device and inode. Otherwise there is no answer, and the program is an ordinary one.
+pub fn verified_executable(pid: i32) -> Option<PathBuf> {
+    let link = format!("/proc/{pid}/exe");
+    let path = std::fs::read_link(&link).ok()?;
+    let real = std::fs::metadata(&link).ok()?;
+    let here = std::fs::metadata(&path).ok()?;
+    (real.dev() == here.dev() && real.ino() == here.ino()).then_some(path)
 }
 
 /// Where system packages put programs.
@@ -126,5 +146,32 @@ mod tests {
         let fake = dir.path().join("grim");
         std::fs::write(&fake, "").unwrap();
         assert!(!is_trusted(&fake, None, &named), "a grim in a folder the user can write to is not trusted");
+    }
+
+    #[test]
+    fn the_program_of_a_process_is_the_file_the_kernel_says_it_runs() {
+        // this test process: the path /proc gives names the very file it runs
+        let me = verified_executable(std::process::id() as i32).expect("our own program is found");
+        assert_eq!(std::fs::canonicalize(me).unwrap(), std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap());
+        assert!(verified_executable(i32::MAX).is_none(), "no such process: no answer");
+    }
+
+    #[test]
+    fn a_program_whose_path_names_another_file_here_is_not_believed() {
+        // what a mount namespace does: the process runs one file while its path names another.
+        // Stand-in: run a copy of a program, then put a different file at that path.
+        let dir = tempfile::tempdir().unwrap();
+        let exe = dir.path().join("sleeper");
+        std::fs::copy("/bin/sleep", &exe).or_else(|_| std::fs::copy("/usr/bin/sleep", &exe)).unwrap();
+        let mut child = std::process::Command::new(&exe).arg("30").spawn().unwrap();
+        let pid = child.id() as i32;
+        assert!(verified_executable(pid).is_some());
+        let other = dir.path().join("other");
+        std::fs::write(&other, b"something else").unwrap();
+        std::fs::rename(&other, &exe).unwrap();
+        let seen = verified_executable(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(seen.is_none(), "the path now names a different file: {seen:?}");
     }
 }

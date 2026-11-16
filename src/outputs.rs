@@ -188,7 +188,7 @@ impl Fde {
     pub fn start_session(&mut self) {
         self.session_started = true;
         self.write_layout_state();
-        if crate::shell::greeter_mode() {
+        if self.greeter {
             crate::shell::start_greeter();
             self.write_outputs_state();
             return;

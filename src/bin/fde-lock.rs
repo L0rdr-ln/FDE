@@ -117,7 +117,7 @@ impl Dispatch<wl_keyboard::WlKeyboard, ()> for App {
                     app.message.clear();
                     app.redraw = true;
                 } else if sym == xkb::Keysym::Escape {
-                    app.typed.clear();
+                    lockscreen::wipe(&mut app.typed);
                     app.message.clear();
                     app.redraw = true;
                 } else {
@@ -185,12 +185,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         if app.unlock {
             app.unlock = false;
             if lockscreen::check_password(&user, &app.typed) {
+                lockscreen::wipe(&mut app.typed);
                 lock.unlock_and_destroy();
                 conn.flush()?;
                 queue.roundtrip(&mut app)?;
                 return Ok(());
             }
-            app.typed.clear();
+            lockscreen::wipe(&mut app.typed);
             app.message = "Wrong password, try again".into();
             app.redraw = true;
         }

@@ -16,7 +16,7 @@ FDE keeps that away from ordinary programs.
 | an overlay above everything, full-screen windows included (layer-shell `overlay`) | **no**, it is closed | yes |
 | pulling itself to the front (`xdg-activation`) | only with a token asked for right after the user did something in the program that has the keyboard, and used within 10 seconds | the same |
 
-**Trusted** means one of FDE's own programs (`fde-panel`, `fde-lock`, `fde-notify`, `fde-shot`,
+**Trusted** means one of FDE's own programs (`fde-panel`, `fde-lock`, `fde-greeter`, `fde-notify`, `fde-shot`,
 `fde-settings`, `fde-music`) installed next to the compositor, or a program named in
 `[security] trusted_programs` that is installed in a system folder (`/usr`, `/bin`, `/opt`,
 `/nix/store` ...), owned by root and writable by nobody else. The default list is `grim`,
@@ -25,6 +25,9 @@ FDE keeps that away from ordinary programs.
 `wofi`, `rofi`, `tofi`, `bemenu`, `bemenu-run`, `nwg-drawer`, `wlogout`, `mako`, `dunst`,
 `swaync`. The compositor asks the kernel which program is on the
 other end of each connection (SO_PEERCRED), so a program cannot claim to be another one by name.
+The path the kernel reports is believed only if it names, on the real file system, the very file
+the process runs (same device and inode): a program in a sandbox or a mount namespace of its own
+cannot dress itself up as `/usr/bin/grim`.
 
 ```toml
 [security]
@@ -39,7 +42,17 @@ restrict = true                                          # false: every program 
   ignored. (Both used to be possible; there are tests for them now.)
 - If the lock program crashes, the screen stays locked: nothing but the lock surface is drawn,
   and the only key that still works is switching consoles.
-- The password is checked by PAM's `unix_chkpwd`, as on any Linux desktop.
+- The password is checked by PAM's `unix_chkpwd`, as on any Linux desktop, and only by the copy the
+  system installed (never one found through `$PATH`). Release builds have no way to swap the check
+  for another command (test builds do, for the tests).
+- The typed password is overwritten in memory as soon as it has been checked or cleared.
+
+### The login screen
+
+- The compositor behind `fde-greeter` (`FDE_GREETER=1`) has no keyboard shortcuts except switching
+  consoles: nobody at the login screen can open a terminal, quit the compositor or start anything.
+  It starts no task bar and no autostart programs, and never starts the lock screen.
+- The password goes to greetd (PAM) only; the greeter keeps no copy.
 
 ### X11 programs
 
@@ -52,6 +65,10 @@ has the keyboard, and they never get screen capture of Wayland windows.
 - FDE's own programs keep their pictures in anonymous memory (`memfd`), never in a named file in
   `/tmp` another program could replace or read.
 - State files (`outputs.toml`, `workspace`, `dnd`) live in `$XDG_RUNTIME_DIR`, which only you can read.
+- Notifications are cut to a size a bubble can show (any program on the session bus may send them),
+  so a program cannot fill the history or memory with one huge message.
+- A window's own name can choose an icon from the icon themes, never a picture file by path.
+- A Wi-Fi network's name is never read as a command option when you connect to it.
 - The configuration is written by the settings app to a temporary file and moved into place, and
   a bad value is refused before anything is written.
 
@@ -60,7 +77,8 @@ has the keyboard, and they never get screen capture of Wayland windows.
 - **Programs running as you, outside a sandbox.** They can read your files, change your
   configuration and start trusted programs with their own settings. That is true on every Linux
   desktop; sandboxes (Flatpak) are what separates programs. FDE does make sure sandboxed programs
-  never count as trusted.
+  never count as trusted. (Such a program could also open the connection itself and then turn into
+  a trusted program, keeping the connection: the same thing by another road.)
 - **Panels.** Any program may still place a panel above the windows (layer-shell `top`), because
   task bars from other projects need it. It cannot cover full-screen windows or the lock screen, and
   it gets no typing unless you click it, but it could still draw something that looks like a

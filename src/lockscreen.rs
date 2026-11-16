@@ -124,23 +124,24 @@ mod tests {
     }
 }
 
-/// Is `password` right for `user`? Runs `$FDE_LOCK_CHECK` (a shell command that reads the
-/// password on its standard input and exits 0 if it is right) or else PAM's own helper
-/// `unix_chkpwd`, which checks the password of the user running it.
+/// Is `password` right for `user`? Asks PAM's own helper `unix_chkpwd`, which checks the password
+/// of the user running it. Test builds (never a release build) run `$FDE_LOCK_CHECK` instead: a
+/// shell command that reads the password on its standard input and exits 0 if it is right.
 pub fn check_password(user: &str, password: &str) -> bool {
     use std::io::Write;
     use std::process::{Command, Stdio};
-    let mut cmd = match std::env::var("FDE_LOCK_CHECK") {
-        Ok(c) => {
+    let test_check = if cfg!(debug_assertions) { std::env::var("FDE_LOCK_CHECK").ok() } else { None };
+    let mut cmd = match test_check {
+        Some(c) => {
             let mut cmd = Command::new("sh");
             cmd.arg("-c").arg(c).env("FDE_LOCK_USER", user);
             cmd
         }
-        Err(_) => {
-            let helper = ["/sbin/unix_chkpwd", "/usr/sbin/unix_chkpwd", "/usr/bin/unix_chkpwd"]
-                .into_iter()
-                .find(|p| std::path::Path::new(p).exists())
-                .unwrap_or("unix_chkpwd");
+        None => {
+            // only the helper where the system installs it: never one found through $PATH
+            let Some(helper) = ["/sbin/unix_chkpwd", "/usr/sbin/unix_chkpwd", "/usr/bin/unix_chkpwd"].into_iter().find(|p| std::path::Path::new(p).exists()) else {
+                return false;
+            };
             let mut cmd = Command::new(helper);
             cmd.arg(user).arg("nullok");
             cmd
@@ -158,4 +159,27 @@ pub fn check_password(user: &str, password: &str) -> bool {
 
 fn fde_pal() -> crate::theme::Palette {
     crate::theme::palette()
+}
+
+/// Forget a typed password: overwrite it before the memory is given back.
+pub fn wipe(secret: &mut String) {
+    // zero bytes are valid UTF-8, so the string stays valid while it is overwritten
+    for b in unsafe { secret.as_bytes_mut() } {
+        unsafe { std::ptr::write_volatile(b, 0) };
+    }
+    secret.clear();
+}
+
+#[cfg(test)]
+mod secret_tests {
+    #[test]
+    fn a_wiped_password_is_empty_and_its_bytes_are_gone() {
+        let mut s = String::from("hunter2");
+        let (ptr, len) = (s.as_ptr(), s.len());
+        super::wipe(&mut s);
+        assert!(s.is_empty());
+        // the buffer is still owned by `s` (clear keeps the capacity)
+        let old = unsafe { std::slice::from_raw_parts(ptr, len) };
+        assert!(old.iter().all(|&b| b == 0));
+    }
 }

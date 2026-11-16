@@ -103,6 +103,9 @@ pub struct Fde {
     pub session_lock_state: smithay::wayland::session_lock::SessionLockManagerState,
     /// the session is locked: only `lock_surface` is shown and gets input
     pub locked: bool,
+    /// this compositor is the login screen's (`FDE_GREETER=1`): nobody is logged in, so it has
+    /// no shortcuts, starts nothing and never locks
+    pub greeter: bool,
     pub lock_surfaces: Vec<(Output, smithay::wayland::session_lock::LockSurface)>,
     /// the lock object of the program that locked the screen; only its own unlock counts
     pub lock_owner: Option<smithay::reexports::wayland_protocols::ext::session_lock::v1::server::ext_session_lock_v1::ExtSessionLockV1>,
@@ -347,6 +350,7 @@ impl Fde {
             layer_shell_state,
             session_lock_state,
             locked: false,
+            greeter: crate::shell::greeter_mode(),
             lock_surfaces: Vec::new(),
             lock_owner: None,
             unlock_pending: false,
@@ -537,7 +541,7 @@ impl Fde {
     /// Returns true when it started the lock screen just now.
     pub fn check_idle(&mut self) -> bool {
         let limit = self.config.session.idle_lock_seconds as u64;
-        if limit == 0 || self.locked || self.idle_lock_started {
+        if limit == 0 || self.locked || self.greeter || self.idle_lock_started {
             return false;
         }
         if self.last_activity.elapsed() < std::time::Duration::from_secs(limit) {
