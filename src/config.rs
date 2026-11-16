@@ -425,6 +425,12 @@ impl Config {
         style.title_ink_dim = col(&t.title_ink_dim);
         style.title_glow = t.title_glow;
         style.blur_levels = blur as usize;
+        style.openbox = if t.openbox.is_some() { 1.0 } else { 0.0 };
+    }
+
+    /// The Openbox theme in use, if the theme is one.
+    pub fn openbox_theme(&self) -> Option<std::sync::Arc<crate::obtheme::ObTheme>> {
+        self.theme().openbox
     }
 }
 

@@ -26,6 +26,7 @@ pub mod layers;
 pub mod lockscreen;
 pub mod nightlight;
 pub mod notify;
+pub mod obtheme;
 pub mod outputs;
 pub mod layout;
 pub mod panel;

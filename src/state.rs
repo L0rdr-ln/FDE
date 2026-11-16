@@ -252,6 +252,16 @@ pub struct Fde {
     pub session: Option<smithay::backend::session::libseat::LibSeatSession>,
     /// rendered window titles, by surface
     pub titles: std::collections::HashMap<(smithay::reexports::wayland_server::backend::ObjectId, i32), TitleTex>,
+    /// the Openbox theme the frames are drawn from (None: the glass frames)
+    pub ob_theme: Option<std::sync::Arc<crate::obtheme::ObTheme>>,
+    /// the frames drawn from it, by surface
+    pub ob_frames: std::collections::HashMap<(smithay::reexports::wayland_server::backend::ObjectId, i32), ObFrameTex>,
+}
+
+/// A window frame drawn from an Openbox theme, with what it was drawn for.
+pub struct ObFrameTex {
+    pub key: (usize, usize, bool, bool, String, usize),
+    pub texture: smithay::backend::renderer::gles::GlesTexture,
 }
 
 /// The wallpaper picture: the file the configuration names, else the one built into the program
@@ -339,6 +349,7 @@ impl Fde {
         seat.add_keyboard(xkb, config.input.repeat_delay, config.input.repeat_rate).expect("keyboard");
         let mut style = GlassStyle::default();
         config.apply_style(&mut style);
+        let ob_theme = config.openbox_theme();
         seat.add_pointer();
         let wallpaper_image = load_wallpaper(&config);
         let cursor_theme = crate::cursortheme::CursorTheme::load(&config.appearance.cursor_theme, config.appearance.cursor_size);
@@ -467,6 +478,8 @@ impl Fde {
             hover_cursor: "default",
             session: None,
             titles: std::collections::HashMap::new(),
+            ob_theme,
+            ob_frames: std::collections::HashMap::new(),
         }
     }
 
@@ -493,6 +506,8 @@ impl Fde {
         tracing::info!("configuration reloaded");
         self.request_redraw();
         new.apply_style(&mut self.style);
+        self.ob_theme = new.openbox_theme();
+        self.ob_frames.clear();
         if std::env::var_os("FDE_TERMINAL").is_none() {
             self.terminal = new.shell.terminal.clone();
         }

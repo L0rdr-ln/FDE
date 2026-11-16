@@ -48,6 +48,57 @@ impl View {
 }
 
 impl Fde {
+    /// The window's frame drawn from the Openbox theme, as a texture the size of the window with
+    /// its frame (`outer`, in scene pixels). Drawn again only when its size, the focus, the title,
+    /// the maximized state or the theme change.
+    fn ob_frame_texture(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        window: &Window,
+        theme: &std::sync::Arc<crate::obtheme::ObTheme>,
+        style: &GlassStyle,
+        outer: Rectangle<i32, Physical>,
+        focused: bool,
+        scale: f64,
+    ) -> Result<Option<GlesTexture>, GlesError> {
+        let Some(surface) = window.wl_surface().map(|s| s.into_owned()) else { return Ok(None) };
+        let title = self.window_title(window);
+        let maximized = self.is_maximized(window);
+        let (w, h) = (outer.size.w.max(1) as usize, outer.size.h.max(1) as usize);
+        let key = (w, h, focused, maximized, title.clone(), std::sync::Arc::as_ptr(theme) as usize);
+        let cache_key = (surface.id(), (scale * 1000.0) as i32);
+        if let Some(f) = self.ob_frames.get(&cache_key) {
+            if f.key == key {
+                return Ok(Some(f.texture.clone()));
+            }
+        }
+        use crate::layout::{button_geom, Button};
+        use crate::obtheme::{ButtonSpot, FrameSpec, Glyph, Label};
+        // the buttons where hit testing finds them
+        let local = Rectangle::<i32, smithay::utils::Logical>::new((0, 0).into(), (w as i32, h as i32).into());
+        let spot = |b: Button, glyph: Glyph| -> ButtonSpot {
+            let (c, hw, hh) = button_geom(local, style, b);
+            ButtonSpot { glyph, x: (c.x - hw).round() as i32, y: (c.y - hh).round() as i32, w: (hw * 2.0).round() as i32, h: (hh * 2.0).round() as i32 }
+        };
+        let buttons = [
+            spot(Button::Minimize, Glyph::Iconify),
+            spot(Button::Maximize, if maximized { Glyph::Restore } else { Glyph::Maximize }),
+            spot(Button::Close, Glyph::Close),
+        ];
+        let look = if focused { &theme.active } else { &theme.inactive };
+        let buttons_left = buttons.iter().map(|b| b.x).min().unwrap_or(w as i32);
+        let pad = (theme.padding_w as f64 * scale).round() as i32;
+        let room = (buttons_left - 2 * pad - (style.border as i32)).max(0);
+        let label = self.text.line(&title, room, 13.0 * scale as f32, look.label_text, None, 0);
+        let canvas = crate::obtheme::render_frame(
+            theme,
+            &FrameSpec { w, h, scale: scale as f32, focused, label: label.as_ref().map(|l| Label { rgba: &l.rgba, w: l.width as usize, h: l.height as usize }), buttons: &buttons },
+        );
+        let texture = renderer.import_memory(&canvas.px, Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((w as i32, h as i32)), false)?;
+        self.ob_frames.insert(cache_key, crate::state::ObFrameTex { key, texture: texture.clone() });
+        Ok(Some(texture))
+    }
+
     /// The window's title as a texture and where to draw it (in scene pixels; `style` and `outer`
     /// are already in those pixels, `scale` is the monitor's), or None if there is no title.
     fn title_texture(
@@ -459,8 +510,10 @@ impl Fde {
                 )
                 .intersection(full)
                 .unwrap_or(visible);
-                // (a window that draws its own frame gets no glass behind it)
-                let backdrop = if !framed {
+                // (a window that draws its own frame gets no glass behind it, nor does one in an
+                // Openbox theme: its frame is a picture)
+                let ob_theme = if framed && style.openbox > 0.5 { self.ob_theme.clone() } else { None };
+                let backdrop = if !framed || ob_theme.is_some() {
                     None
                 } else {
                 let blurred = glass.blur(renderer, scene, region, if self.fast_mode() { 1 } else { style.blur_levels })?;
@@ -508,7 +561,11 @@ impl Fde {
                 ));
 
                 // the title (re-rendered only when it, its room or the focus change)
-                let title_draw = if framed { self.title_texture(renderer, window, &style, outer_d, focused, view.scale)? } else { None };
+                let title_draw = if framed && ob_theme.is_none() { self.title_texture(renderer, window, &style, outer_d, focused, view.scale)? } else { None };
+                let ob_frame = match &ob_theme {
+                    Some(t) => self.ob_frame_texture(renderer, window, t, &style, outer_d, focused, view.scale)?,
+                    None => None,
+                };
 
                 let to_texture = tmp.is_some();
                 let target_tex: &mut GlesTexture = match tmp.as_mut() {
@@ -525,6 +582,10 @@ impl Fde {
                         glass.draw_shadow(&mut frame, blurred, outer_d, &style, view.scale as f32, alpha)?;
                     }
                     glass.draw_panel_part(&mut frame, blurred, *src, outer_d, &style, alpha)?;
+                }
+                if let Some(tex) = &ob_frame {
+                    let src_full = Rectangle::<f64, BufferCoord>::from_size((tex.size().w as f64, tex.size().h as f64).into());
+                    frame.render_texture_from_to(tex, src_full, outer_d, &[Rectangle::from_size(outer_d.size)], &[], Transform::Normal, alpha, None, &[])?;
                 }
                 if let Some((tex, dest)) = &title_draw {
                     let src_full = Rectangle::<f64, BufferCoord>::from_size((tex.size().w as f64, tex.size().h as f64).into());

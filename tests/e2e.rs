@@ -1760,6 +1760,64 @@ fn the_overview_lays_out_all_windows_and_a_click_picks_one() {
 }
 
 #[test]
+fn an_openbox_theme_gives_windows_its_frame() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    // a theme folder in a place FDE looks
+    let themes = dir.path().join("themes");
+    std::fs::create_dir_all(themes.join("Test Theme/openbox-3")).unwrap();
+    std::fs::write(
+        themes.join("Test Theme/openbox-3/themerc"),
+        "border.width: 2\nwindow.client.padding.width: 0\npadding.width: 4\npadding.height: 4\n\
+         window.active.title.bg: Flat Solid\nwindow.active.title.bg.color: #cc2200\n\
+         window.inactive.title.bg: Flat Solid\nwindow.inactive.title.bg.color: #555555\n\
+         window.active.border.color: #00aa00\nwindow.inactive.border.color: #00aa00\n\
+         window.active.client.color: #00aa00\nwindow.inactive.client.color: #00aa00\n\
+         window.active.label.text.color: #ffffff\n",
+    )
+    .unwrap();
+    std::env::set_var("FDE_OPENBOX_THEMES", &themes);
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-openbox") else { return };
+    let mut config = fde::config::Config::default();
+    config.appearance.theme = "openbox:Test Theme".into();
+    assert!(fde::theme::Theme::find("openbox:Test Theme").is_ok(), "the theme is found");
+    hn.state.config = config.clone();
+    config.apply_style(&mut hn.state.style);
+    hn.state.ob_theme = config.openbox_theme();
+    assert!(hn.state.ob_theme.is_some() && hn.state.style.openbox > 0.5);
+    assert_eq!((hn.state.style.border, hn.state.style.titlebar), (2.0, 22.0), "the theme's sizes: 2 px border, 14 + 2 x 4 title");
+    hn.state.config.appearance.open_effect = "pop".into();
+    open_window(&mut hn, dir.path(), "fde-e2e-openbox", 300, 200);
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    hn.state.set_open_start(&win, Instant::now() - Duration::from_secs(10));
+    hn.state.focus_window(&win);
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let bytes = grab_scene(&mut renderer, &mut scene);
+    dump_frame(&bytes, 800, 600, "openbox", 0);
+    let outer = hn.state.outer_of(&win).unwrap();
+    // the title bar is the theme's red, the border its green, flat and opaque (no glass)
+    let (tx, ty) = (outer.loc.x + outer.size.w / 2 - 40, outer.loc.y + 2 + 6);
+    let title = pixel(&bytes, 800, tx, ty);
+    assert!(title[0] > 170 && title[1] < 60 && title[2] < 40, "the title bar is #cc2200: {title:?}");
+    let border = pixel(&bytes, 800, outer.loc.x, outer.loc.y + outer.size.h / 2);
+    assert!(border[1] > 140 && border[0] < 40 && border[2] < 40, "the border is #00aa00: {border:?}");
+    // the client's blue is inside
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    let inside = pixel(&bytes, 800, g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2);
+    assert!(inside[2] > 150 && inside[0] < 100, "the program's pixels: {inside:?}");
+    // not focused: the grey title bar
+    hn.state.seat.get_keyboard().unwrap().set_focus(&mut hn.state, None, smithay::utils::SERIAL_COUNTER.next_serial());
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let bytes = grab_scene(&mut renderer, &mut scene);
+    let grey = pixel(&bytes, 800, tx, ty);
+    assert!((grey[0] - 0x55).abs() < 20 && (grey[1] - 0x55).abs() < 20, "unfocused title bar #555555: {grey:?}");
+    // the picker lists it
+    assert!(fde::theme::Theme::list().iter().any(|(id, name)| id == "openbox:Test Theme" && name == "Test Theme (Openbox)"));
+    std::env::remove_var("FDE_OPENBOX_THEMES");
+}
+
+#[test]
 fn a_wallpaper_picture_from_the_configuration_is_what_the_monitor_shows() {
     let dir = tempfile::tempdir().unwrap();
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

@@ -75,3 +75,23 @@ color2 = "#050b24"             # the bottom of the gradient
 A wallpaper you choose in the settings (`[wallpaper] path`) replaces the theme's. The task bar,
 start menu, lock screen and notifications take their colours from the accent; they look at the
 theme again every few seconds, so a change reaches them without a restart.
+
+## Openbox themes
+
+FDE can wear an Openbox theme. Put the theme folder where Openbox keeps themes (`~/.themes/NAME/`,
+`~/.local/share/themes/NAME/`, `/usr/share/themes/NAME/`; for Debian and Ubuntu `sudo apt install openbox`
+brings Clearlooks, Onyx, Mikachu, Nightmare and more) and choose it in Settings → Appearance (it is listed as
+"NAME (Openbox)"), or write
+
+    [appearance]
+    theme = "openbox:Onyx"
+
+What is used from the theme (`NAME/openbox-3/themerc` and the `.xbm` bitmaps next to it): the title bar,
+label and border textures (solid, gradient in every direction, raised or sunken with bevel, interlaced,
+borders), the label text colours and justification, the border width and paddings, and the button
+bitmaps (`close.xbm`, `max.xbm`, `max_toggled.xbm`, `iconify.xbm`) in the theme's button colour. The accent colour of
+the task bar and menus is taken from the middle of the title bar.
+
+What is not used: the handle at the bottom with its grips, the window icon and the shade, desktop and sticky buttons,
+the pressed and hover looks of the buttons, menu and on-screen-display colours, and the theme's font. Frames in an
+Openbox theme are flat pictures: no blur, no shadow, no glass.

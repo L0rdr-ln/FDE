@@ -50,6 +50,8 @@ pub struct GlassStyle {
     pub title_glow: f32,
     /// blur: number of down/up levels (more = blurrier) and the offset multiplier of a pass
     pub blur_levels: usize,
+    /// 1 = the frame is an Openbox theme drawn in software (the glass is not used for frames)
+    pub openbox: f32,
 }
 
 impl GlassStyle {
@@ -98,6 +100,7 @@ impl Default for GlassStyle {
             title_ink_dim: [0.059, 0.133, 0.212],
             title_glow: 0.95,
             blur_levels: 3,
+            openbox: 0.0,
         }
     }
 }

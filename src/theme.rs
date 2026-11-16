@@ -75,6 +75,9 @@ pub struct Theme {
     pub title_align: String,
     pub buttons: Buttons,
     pub wallpaper: ThemeWallpaper,
+    /// set when this is an Openbox theme: the frames are drawn from it
+    #[serde(skip)]
+    pub openbox: Option<std::sync::Arc<crate::obtheme::ObTheme>>,
 }
 
 impl Default for Theme {
@@ -103,6 +106,7 @@ impl Default for Theme {
             title_align: "left".into(),
             buttons: Buttons::default(),
             wallpaper: ThemeWallpaper::default(),
+            openbox: None,
         }
     }
 }
@@ -164,8 +168,48 @@ impl Theme {
         Ok(t)
     }
 
-    /// The theme called `id`: the user's own files first, then the ones that come with FDE.
+    /// An Openbox theme as a theme: its sizes and colours in the places the frame and the shell
+    /// look for them. The frames themselves are drawn from `openbox`.
+    pub fn from_openbox(ob: crate::obtheme::ObTheme) -> Theme {
+        let hex = |c: [u8; 3]| format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]);
+        let mut t = Theme::default();
+        t.name = format!("{} (Openbox)", ob.name);
+        t.description = "an Openbox theme".into();
+        t.accent = hex(ob.accent());
+        t.transparency = 0.85;
+        t.gloss = 0.0;
+        t.radius = 0.0;
+        t.radius_bottom = 0.0;
+        t.border = ob.frame_width() as f32;
+        t.titlebar = ob.title_height() as f32;
+        t.highlight = 0.0;
+        t.reflections = 0.0;
+        t.glow = 0.0;
+        t.shadow = 0.0;
+        t.rim = 0.0;
+        t.title_ink = hex(ob.active.label_text);
+        t.title_ink_dim = hex(ob.inactive.label_text);
+        t.title_glow = 0.0;
+        t.title_align = if ob.justify == crate::obtheme::Justify::Center { "center".into() } else { "left".into() };
+        t.buttons = Buttons {
+            style: "flat".into(),
+            side: "right".into(),
+            size: crate::obtheme::LABEL_HEIGHT as f32,
+            gap: ob.padding_w as f32,
+            margin: ob.padding_w as f32,
+            ..Buttons::default()
+        };
+        t.openbox = Some(std::sync::Arc::new(ob));
+        t
+    }
+
+    /// The theme called `id`: the user's own files first, then the ones that come with FDE. An id
+    /// of the form `openbox:NAME` is the Openbox theme NAME from `~/.themes` and the like.
     pub fn find(id: &str) -> Result<Theme, String> {
+        if let Some(name) = id.strip_prefix("openbox:") {
+            let dir = crate::obtheme::find_dir(name, &crate::obtheme::theme_dirs()).ok_or_else(|| format!("no Openbox theme \"{name}\" (looked in ~/.themes and /usr/share/themes)"))?;
+            return crate::obtheme::ObTheme::load(&dir).map(Theme::from_openbox);
+        }
         if !valid_id(id) {
             return Err(format!("\"{id}\" is not a theme name"));
         }
@@ -188,6 +232,9 @@ impl Theme {
             if let Ok(t) = Theme::parse(text) {
                 out.push((id.to_string(), t.name));
             }
+        }
+        for name in crate::obtheme::list_names(&crate::obtheme::theme_dirs()) {
+            out.push((format!("openbox:{name}"), format!("{name} (Openbox)")));
         }
         for d in dirs() {
             let Ok(rd) = std::fs::read_dir(&d) else { continue };
