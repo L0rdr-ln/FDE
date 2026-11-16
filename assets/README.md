@@ -6,8 +6,8 @@
   back to its generated sky (`wallpaper::bundled()` returns None only if the file cannot be
   decoded; delete the `include_bytes!` line in `src/wallpaper.rs` and `configured()` falls back).
 
-- `title.svg`: the "FDE" title at the top of the main README. The letters are outlines of the Inter
-  Display typeface (SIL Open Font License 1.1, which allows this) with a blue gradient.
+- `logo.svg`: the FDE logo, a glass orb with sky and a hill. Original, drawn by hand as SVG,
+  MIT like the rest of the project.
 
 Everything else in the project's artwork is generated in code.
 
