@@ -1,46 +1,115 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 560 220" width="560" height="220">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 572 230" width="572" height="230" role="img" aria-label="FDE">
   <title>FDE</title>
   <defs>
-    <radialGradient id="sky" cx="50%" cy="35%" r="70%">
-      <stop offset="0" stop-color="#bfeaff"/>
-      <stop offset="0.55" stop-color="#4aa8ee"/>
-      <stop offset="1" stop-color="#14559e"/>
-    </radialGradient>
-    <linearGradient id="hill" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#9be15d"/>
-      <stop offset="1" stop-color="#2f8f2a"/>
+    <!-- orb -->
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#0d5cb8"/>
+      <stop offset="0.45" stop-color="#3b9be8"/>
+      <stop offset="0.78" stop-color="#9ad8fb"/>
+      <stop offset="1" stop-color="#e3f6ff"/>
     </linearGradient>
+    <radialGradient id="sun" cx="0.72" cy="0.62" r="0.45">
+      <stop offset="0" stop-color="#fffbe6" stop-opacity="0.95"/>
+      <stop offset="0.35" stop-color="#fff3b8" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#fff3b8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="hillBack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#8fd98a"/>
+      <stop offset="1" stop-color="#4aa96a"/>
+    </linearGradient>
+    <linearGradient id="hillFront" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b6ee5c"/>
+      <stop offset="0.5" stop-color="#5fc23a"/>
+      <stop offset="1" stop-color="#1f7a2c"/>
+    </linearGradient>
+    <radialGradient id="vignette" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0.62" stop-color="#04264f" stop-opacity="0"/>
+      <stop offset="1" stop-color="#04264f" stop-opacity="0.55"/>
+    </radialGradient>
+    <radialGradient id="caustic" cx="0.5" cy="1" r="0.62" gradientTransform="translate(0 0)">
+      <stop offset="0" stop-color="#d9fbff" stop-opacity="0.85"/>
+      <stop offset="0.5" stop-color="#8fe3ff" stop-opacity="0.28"/>
+      <stop offset="1" stop-color="#8fe3ff" stop-opacity="0"/>
+    </radialGradient>
     <linearGradient id="gloss" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#fff" stop-opacity="0.95"/>
-      <stop offset="1" stop-color="#fff" stop-opacity="0.05"/>
+      <stop offset="0" stop-color="#eaf8ff" stop-opacity="0.62"/>
+      <stop offset="0.6" stop-color="#cfeeff" stop-opacity="0.2"/>
+      <stop offset="1" stop-color="#cfeeff" stop-opacity="0.02"/>
     </linearGradient>
-    <radialGradient id="glow" cx="50%" cy="100%" r="60%">
-      <stop offset="0" stop-color="#fff" stop-opacity="0.55"/>
-      <stop offset="1" stop-color="#fff" stop-opacity="0"/>
-    </radialGradient>
-    <linearGradient id="ink" gradientUnits="userSpaceOnUse" x1="0" y1="40" x2="0" y2="180">
-      <stop offset="0" stop-color="#7cc6f7"/>
-      <stop offset="0.5" stop-color="#2f8fe0"/>
-      <stop offset="1" stop-color="#14559e"/>
+    <linearGradient id="rim" gradientUnits="userSpaceOnUse" x1="0" y1="14" x2="0" y2="202">
+      <stop offset="0" stop-color="#fff" stop-opacity="1"/>
+      <stop offset="0.5" stop-color="#cfeeff" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0.85"/>
     </linearGradient>
-    <clipPath id="orb"><circle cx="110" cy="110" r="92"/></clipPath>
-    <g id="letters" fill="none" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M255 52 V168 M255 52 H320 M255 108 H308"/>
-      <path d="M355 52 V168 H378 C432 168 432 52 378 52 Z"/>
-      <path d="M470 52 V168 M470 52 H535 M470 110 H522 M470 168 H535"/>
-    </g>
+    <linearGradient id="shell" gradientUnits="userSpaceOnUse" x1="0" y1="14" x2="0" y2="202">
+      <stop offset="0" stop-color="#7fc8fa"/>
+      <stop offset="0.5" stop-color="#1f6fc4"/>
+      <stop offset="1" stop-color="#0a3f86"/>
+    </linearGradient>
+    <clipPath id="sphere"><circle cx="110" cy="108" r="86"/></clipPath>
+    <filter id="b2" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="2"/></filter>
+    <filter id="b5" x="-30%" y="-60%" width="160%" height="220%"><feGaussianBlur stdDeviation="5"/></filter>
+    <filter id="b9" x="-40%" y="-200%" width="180%" height="500%"><feGaussianBlur stdDeviation="9"/></filter>
+
+    <!-- lettering -->
+    <path id="w" d="M252.96 162H279.05V120.61H327.69V99.16H279.05V76.18H330.95V54H252.96ZM387.04 162C420.23 162 440.96 140.98 440.96 108C440.96 75.02 419.94 54 387.04 54H346.95V162ZM373.05 140.26V75.74H385.44C405.3 75.74 414.72 86.69 414.72 108C414.72 129.24 405.52 140.26 385.73 140.26ZM457.69 162H538.15V139.82H483.79V118.51H534.02V96.98H483.79V76.18H538.15V54H457.69Z"/>
+    <clipPath id="wc"><use xlink:href="#w" href="#w"/></clipPath>
+    <linearGradient id="tbase" gradientUnits="userSpaceOnUse" x1="0" y1="54" x2="0" y2="162">
+      <stop offset="0" stop-color="#0a4a9a"/>
+      <stop offset="0.55" stop-color="#1c7fdb"/>
+      <stop offset="1" stop-color="#58c4fb"/>
+    </linearGradient>
+    <linearGradient id="tglow" gradientUnits="userSpaceOnUse" x1="0" y1="116" x2="0" y2="162">
+      <stop offset="0" stop-color="#bff1ff" stop-opacity="0"/>
+      <stop offset="1" stop-color="#d9f8ff" stop-opacity="0.75"/>
+    </linearGradient>
+    <linearGradient id="tgloss" gradientUnits="userSpaceOnUse" x1="0" y1="54" x2="0" y2="114">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.9"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0.12"/>
+    </linearGradient>
   </defs>
-  <circle cx="110" cy="116" r="94" fill="#0b3a6e" opacity="0.18"/>
-  <g clip-path="url(#orb)">
-    <rect x="0" y="0" width="220" height="220" fill="url(#sky)"/>
-    <path d="M0 160 C45 125 95 125 135 142 C168 156 195 146 220 138 L220 220 L0 220 Z" fill="url(#hill)"/>
-    <path d="M0 178 C55 156 120 168 220 164 L220 220 L0 220 Z" fill="#247a22" opacity="0.55"/>
-    <rect width="220" height="220" fill="url(#glow)"/>
+
+  <!-- ground shadow of the orb -->
+  <ellipse cx="110" cy="214" rx="66" ry="7" fill="#04264f" opacity="0.42" filter="url(#b5)"/>
+
+  <!-- glass shell -->
+  <circle cx="110" cy="108" r="94" fill="url(#shell)"/>
+
+  <!-- sphere contents -->
+  <g clip-path="url(#sphere)">
+    <rect x="10" y="14" width="200" height="200" fill="url(#sky)"/>
+    <rect x="10" y="14" width="200" height="200" fill="url(#sun)"/>
+    <g fill="#fff" filter="url(#b2)" opacity="0.9">
+      <ellipse cx="70" cy="92" rx="30" ry="7"/>
+      <ellipse cx="88" cy="86" rx="20" ry="8"/>
+      <ellipse cx="156" cy="74" rx="24" ry="5.5"/>
+      <ellipse cx="170" cy="70" rx="14" ry="5"/>
+    </g>
+    <path d="M10 138 C48 116 86 114 118 128 C146 140 176 132 210 118 L210 214 L10 214 Z" fill="url(#hillBack)"/>
+    <path d="M10 150 C52 132 104 138 140 152 C168 162 192 156 210 148 L210 214 L10 214 Z" fill="url(#hillFront)"/>
+    <path d="M10 150 C52 132 104 138 140 152 C168 162 192 156 210 148" fill="none" stroke="#e6ff9a" stroke-width="1.6" opacity="0.8"/>
+    <ellipse cx="110" cy="198" rx="86" ry="46" fill="url(#caustic)"/>
+    <circle cx="110" cy="108" r="86" fill="url(#vignette)"/>
   </g>
-  <ellipse cx="110" cy="62" rx="68" ry="44" fill="url(#gloss)"/>
-  <circle cx="110" cy="110" r="91" fill="none" stroke="#fff" stroke-opacity="0.85" stroke-width="3"/>
-  <circle cx="110" cy="110" r="93.5" fill="none" stroke="#0e4a8a" stroke-opacity="0.6" stroke-width="2"/>
-  <use href="#letters" stroke="#0b3a6e" stroke-opacity="0.25" stroke-width="30" transform="translate(0 5)"/>
-  <use href="#letters" stroke="url(#ink)" stroke-width="28"/>
-  <use href="#letters" stroke="#fff" stroke-opacity="0.55" stroke-width="7" transform="translate(0 -7)"/>
+
+  <!-- top gloss and specular glints -->
+  <path d="M110 17 C70 17 40 38 33 66 C60 86 160 86 187 66 C180 38 150 17 110 17 Z" fill="url(#gloss)"/>
+  <ellipse cx="70" cy="40" rx="15" ry="6" transform="rotate(-32 70 40)" fill="#fff" opacity="0.9" filter="url(#b2)"/>
+  <circle cx="178" cy="150" r="3" fill="#fff" opacity="0.65" filter="url(#b2)"/>
+
+  <!-- rim light and edge -->
+  <circle cx="110" cy="108" r="86.5" fill="none" stroke="url(#rim)" stroke-width="2.4"/>
+  <circle cx="110" cy="108" r="94.5" fill="none" stroke="#06326a" stroke-opacity="0.75" stroke-width="1.2"/>
+  <circle cx="110" cy="108" r="92.5" fill="none" stroke="#fff" stroke-opacity="0.35" stroke-width="1"/>
+
+  <!-- lettering: shadow -->
+  <use xlink:href="#w" href="#w" fill="#04264f" opacity="0.45" filter="url(#b5)" transform="translate(0 7)"/>
+  <!-- body -->
+  <use xlink:href="#w" href="#w" fill="url(#tbase)"/>
+  <g clip-path="url(#wc)">
+    <rect x="236" y="116" width="572" height="50" fill="url(#tglow)"/>
+    <path d="M236 48 H572 V98 C482 84 366 108 236 92 Z" fill="url(#tgloss)"/>
+    <use xlink:href="#w" href="#w" fill="none" stroke="#fff" stroke-opacity="0.55" stroke-width="3"/>
+  </g>
+  <use xlink:href="#w" href="#w" fill="none" stroke="#05306a" stroke-opacity="0.8" stroke-width="1.1"/>
 </svg>
