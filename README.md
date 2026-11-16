@@ -1,22 +1,29 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="FDE logo" width="128">
+<img src="assets/logo.svg" alt="FDE" width="360">
 
-# FDE
+<br>
 
-**Frutiger Desktop Environment: a Wayland desktop with real glass.**
+A glass-style Wayland desktop environment.
+
+<br>
 
 [![build](https://github.com/L0rdr-ln/FDE/actions/workflows/build.yml/badge.svg)](https://github.com/L0rdr-ln/FDE/actions/workflows/build.yml)
-[![license MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![release](https://img.shields.io/github/v/release/L0rdr-ln/FDE?include_prereleases)](https://github.com/L0rdr-ln/FDE/releases)
 ![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust)
-![Wayland](https://img.shields.io/badge/Wayland-Smithay-ffbc00?logo=wayland&logoColor=white)
-![X11 apps](https://img.shields.io/badge/X11_apps-XWayland-4aa8ee)
 
-[Try it](#try-it) · [Features](#features) · [Keys](#keys) · [Configuration](#configuration) · [Build](#build) · [Roadmap](docs/ROADMAP.md)
+<br>
 
-![FDE with a Qt editor and an X11 terminal in glass frames, the task bar with its window list, network status and workspaces](docs/shell.png)
+[Try it](#try-it) | [Features](#features) | [Keys](#keys) | [Configuration](#configuration) | [Build](#build) | [Roadmap](docs/ROADMAP.md)
+
+<br>
+
+<img src="docs/shell.png" alt="FDE with a Qt editor and an X11 terminal in glass frames, the task bar with its window list, network status and workspaces">
 
 </div>
+
+## About
 
 FDE is a desktop in the **Frutiger Aero** style: glass windows that really blur what is behind
 them, glossy title bars, orb buttons, and a glass task bar and start menu. The goal is a

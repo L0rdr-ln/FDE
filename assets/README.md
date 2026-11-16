@@ -6,7 +6,7 @@
   back to its generated sky (`wallpaper::bundled()` returns None only if the file cannot be
   decoded; delete the `include_bytes!` line in `src/wallpaper.rs` and `configured()` falls back).
 
-- `logo.svg`: the FDE logo, a glass orb with sky and a hill. Original, drawn by hand as SVG,
+- `logo.svg`: the FDE wordmark, a glass orb with sky and a hill and glossy letters. Original, drawn by hand as SVG,
   MIT like the rest of the project.
 
 Everything else in the project's artwork is generated in code.
