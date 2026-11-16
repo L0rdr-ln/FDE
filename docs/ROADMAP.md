@@ -8,7 +8,10 @@ is the first thing to do (see "Next").
 - [x] glass renderer: dual Kawase blur, glass panel shader, drop shadows, reflections, inner glow
 - [x] windows: xdg-shell with server-side glass frames, move / resize / maximize / minimize /
       fullscreen, popups, focus, snapping (Alt+arrows, drag to an edge), wobbly windows (a real
-      triangle mesh), open / minimize / close animations
+      triangle mesh), animations: unrolling open, genie minimize, glass / burn / television close
+- [x] tiling mode per workspace (master and stack, grid, monocle; keys, drag to swap, floating)
+- [x] workspace cube, Flip 3D Alt+Tab, an overview of all windows (Super+Tab), bubbles, click ripples
+- [x] Openbox themes (`openbox:NAME`)
 - [x] input: keyboard and pointer, key shortcuts, pointer lock and confine and relative motion
       (games), cursor themes and named cursors, cursor-shape
 - [x] workspaces (Alt+1..9), window switcher with pictures (Alt+Tab)
@@ -24,7 +27,7 @@ is the first thing to do (see "Next").
 - [ ] touch and tablet input, input methods (CJK typing), keyboard-shortcut inhibit
 - [ ] turning displays off when idle (DPMS), variable refresh rate, HDR and colour management,
       direct scanout, multi-GPU laptops
-- [ ] window rules, session restore, hot corners / overview
+- [ ] window rules, session restore, hot corners
 
 ## Shell
 - [x] `fde-panel`: task bar (start orb, task list, clock, workspace dots, volume and battery),
@@ -36,9 +39,11 @@ is the first thing to do (see "Next").
 - [x] session: environment for programs and portals, polkit agent if installed, portal config for
       screen sharing, a session entry for display managers (docs/SESSION.md)
 - [x] do-not-disturb (Alt+N, shown in the task bar)
-- [ ] notification history
+- [x] notification history (task bar flyout), volume / Wi-Fi / calendar flyouts, window previews as tooltips
+- [x] laptop keys: volume, brightness, media; the screen dims and goes black when idle (no DPMS yet)
+- [x] pinned programs and one task bar button per program
 - [ ] system tray (StatusNotifierItem), network and Bluetooth status, an on-screen display
-- [ ] a greeter (greetd); today a display manager starts `start-fde`
+- [~] a greeter (greetd): `fde-greeter`, tested against a stand-in greetd only
 
 ## Desktop suite
 - [x] `fde-settings`: appearance (themes), displays (scale, resolution, position, night light),
@@ -53,6 +58,7 @@ is the first thing to do (see "Next").
 - [ ] packaging (Debian / Arch), accessibility basics (high contrast, screen reader)
 
 ## Next
-1. Check CI and fix what is red; run the VM script (`tools/vm-setup.sh`) and report what breaks on
-   real hardware (DRM, audio, dmabuf, multi-monitor, X11 and the portals).
+1. Run the VM script (`tools/vm-setup.sh`), then `fde --check` and `fde --selftest`, and report what
+   breaks on real hardware (DRM, audio, dmabuf, multi-monitor, X11, the portals, the effects, the
+   login screen).
 2. Finish what hardware testing shows; then the open items above in the order that hurts most.

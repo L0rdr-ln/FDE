@@ -38,6 +38,7 @@ pub mod redraw;
 pub mod render;
 pub mod screencopy;
 pub mod security;
+pub mod selftest;
 pub mod shell;
 pub mod shm;
 pub mod status;

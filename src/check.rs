@@ -16,7 +16,7 @@ pub struct Report {
 }
 
 impl Report {
-    fn add(&mut self, mark: Mark, text: impl Into<String>) {
+    pub fn add(&mut self, mark: Mark, text: impl Into<String>) {
         self.lines.push((mark, text.into()));
     }
 
@@ -169,6 +169,8 @@ pub fn run_checks(sys: &Path) -> Report {
         }
         Err(e) => r.add(Mark::Bad, format!("no OpenGL ES ({e}): install Mesa (libgl1-mesa-dri, libegl1), or in a VM switch on 3D acceleration")),
     }
+
+    r.add(Mark::Note, "`fde --selftest` draws every effect off-screen and checks that this GPU gets them right");
 
     // input devices (through the seat manager, or directly)
     let events = std::fs::read_dir("/dev/input").map(|d| d.filter_map(|e| e.ok()).filter(|e| e.file_name().to_string_lossy().starts_with("event")).count()).unwrap_or(0);

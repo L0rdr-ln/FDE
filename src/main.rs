@@ -9,6 +9,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fde::check::run_checks(std::path::Path::new("/sys")).print();
         return Ok(());
     }
+    // every effect drawn off-screen on this computer's graphics driver
+    if matches!(args.get(1).map(String::as_str), Some("--selftest") | Some("selftest")) {
+        let report = fde::selftest::run();
+        report.print();
+        if report.lines.iter().any(|(m, _)| *m == fde::check::Mark::Bad) {
+            std::process::exit(1);
+        }
+        return Ok(());
+    }
     tracing_subscriber::fmt::init();
     match args.get(1).map(String::as_str) {
         Some("glass-demo") => {
@@ -43,7 +52,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         _ => {
-            eprintln!("usage: fde [winit|drm]        run nested in a window (winit) or on the hardware (drm); default: by environment\n       fde --check           what FDE would find (GPU, monitors, seat, programs); changes nothing\n       fde glass-demo [out.png]");
+            eprintln!("usage: fde [winit|drm]        run nested in a window (winit) or on the hardware (drm); default: by environment\n       fde --check           what FDE would find (GPU, monitors, seat, programs); changes nothing\n       fde --selftest        draw every effect off-screen and check the pixels (does this GPU do it right?)\n       fde glass-demo [out.png]");
             std::process::exit(2);
         }
     }

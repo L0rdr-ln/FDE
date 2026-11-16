@@ -13,6 +13,11 @@ It looks at the GPU, the monitors, the seat, OpenGL and the programs FDE uses, c
 and marks problems with `!!` and what to do about them. Send its output along when something does
 not work.
 
+**Before the first start, from any terminal:** `fde --check` says what FDE finds (GPU, monitors, seat,
+programs), and `fde --selftest` draws every effect off-screen on this GPU and reads the pixels
+back (blur, glass frame, warped, burning and torn windows, 4K textures) and says which come out
+wrong, with the time one blur pass takes. Paste both outputs when something is off.
+
 In a **VMware** VM: switch on *Accelerate 3D graphics* in the VM's display settings and install
 `open-vm-tools-desktop`. Without 3D, FDE still runs (drawn by the CPU, in fast mode), but slowly.
 
