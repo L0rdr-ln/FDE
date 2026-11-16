@@ -1818,6 +1818,136 @@ fn an_openbox_theme_gives_windows_its_frame() {
 }
 
 #[test]
+fn tiling_many_windows_and_odd_screens_never_breaks_the_layout() {
+    use fde::tiling::{cells, Layout, TileState};
+    use smithay::utils::{Logical, Rectangle};
+    // the layouts for every number of windows, masters and screen shape: always `n` cells, none of
+    // zero size, no overlap in master and stack and in the grid
+    for (w, h) in [(1920, 1080), (800, 600), (320, 200), (100, 50), (20, 20), (4000, 300), (300, 4000)] {
+        let area = Rectangle::<i32, Logical>::new((0, 24).into(), (w, h).into());
+        for layout in [Layout::MasterStack, Layout::Grid, Layout::Monocle] {
+            for n in [0usize, 1, 2, 3, 7, 16, 50, 200] {
+                for masters in [1usize, 2, 8] {
+                    for ratio in [0.0, 0.15, 0.55, 0.85, 3.0, -1.0, f64::NAN] {
+                        let st = TileState { on: true, layout, ratio, masters };
+                        let c = cells(&st, area, n);
+                        assert_eq!(c.len(), n, "{layout:?} n={n}");
+                        assert!(c.iter().all(|r| r.size.w >= 1 && r.size.h >= 1), "{layout:?} n={n} on {w}x{h}: no empty cell");
+                        if layout != Layout::Monocle && w >= 200 && h >= 200 && n <= 16 {
+                            for (i, a) in c.iter().enumerate() {
+                                assert!(c[i + 1..].iter().all(|b| !a.overlaps(*b)), "{layout:?} n={n} {w}x{h}: {a:?} overlaps");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn many_windows_in_tiling_mode_and_fast_workspace_switching_with_the_cube_stay_sane() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-stress") else { return };
+    hn.state.config.appearance.workspace_effect = "cube".into();
+    hn.state.config.appearance.open_effect = "pop".into();
+    hn.state.config.appearance.bubbles = false;
+    for i in 0..14 {
+        open_window(&mut hn, dir.path(), "fde-e2e-stress", 200 + 7 * i, 150);
+    }
+    let wins: Vec<_> = hn.state.space.elements().cloned().collect();
+    for w in &wins {
+        hn.state.set_open_start(w, Instant::now() - Duration::from_secs(10));
+    }
+    hn.state.toggle_tiling();
+    assert_eq!(hn.state.tiled_now().len(), 14);
+    // layouts, masters and ratio changing one after the other, windows leaving and coming back
+    for round in 0..40 {
+        match round % 5 {
+            0 => hn.state.tile_next_layout(),
+            1 => hn.state.tile_masters(1),
+            2 => hn.state.tile_ratio(0.07),
+            3 => hn.state.tile_swap(1),
+            _ => hn.state.tile_promote(),
+        }
+        if round % 7 == 3 {
+            let w = wins[round % wins.len()].clone();
+            hn.state.space.unmap_elem(&w);
+            hn.state.retile();
+            hn.state.space.map_element(w, smithay::utils::Point::<i32, smithay::utils::Logical>::from((30, 30)), false);
+        }
+        hn.state.retile();
+        hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+        let n = hn.state.tiled_now().len();
+        assert!(n >= 13 && n <= 14, "round {round}: {n} tiled");
+    }
+    // workspaces switched faster than the cube turns, in both directions, with the overview open
+    // and a window sent away in between
+    hn.state.toggle_expo();
+    for round in 0..30 {
+        hn.state.switch_workspace(round % 4);
+        if round == 5 {
+            let w = hn.state.space.elements().last().cloned();
+            if let Some(w) = w {
+                hn.state.move_window_to_workspace(&w, (round + 1) % 4);
+            }
+        }
+        hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    }
+    hn.state.expo = None;
+    for _ in 0..4 {
+        hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    }
+    // after the dust settles the cube ends and every frame draws
+    hn.state.cube = None;
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    assert!(hn.state.workspace < 4);
+}
+
+#[test]
+fn the_overview_survives_windows_closing_under_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-expodead") else { return };
+    hn.state.config.appearance.bubbles = false;
+    for _ in 0..3 {
+        open_window(&mut hn, dir.path(), "fde-e2e-expodead", 300, 200);
+    }
+    hn.state.toggle_expo();
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    // two windows go away while the overview is open, the cells follow
+    let wins: Vec<_> = hn.state.space.elements().cloned().collect();
+    for w in &wins[..2] {
+        hn.state.close_window(w);
+    }
+    let t0 = Instant::now();
+    while hn.state.space.elements().count() > 1 {
+        hn.pump();
+        hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+        assert!(t0.elapsed() < Duration::from_secs(10), "the windows closed");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    assert_eq!(hn.state.expo.as_ref().map(|e| e.windows.len()), Some(1), "the overview shows what is left");
+    assert_eq!(hn.state.expo_cells().len(), 1);
+    // a click on the place of a dead window chooses nothing, and does not crash
+    hn.state.pointer_location = (5.0, 5.0).into();
+    hn.state.pointer_button(0x110, true, 0);
+    hn.state.pointer_button(0x110, false, 1);
+    // the last window goes: the overview ends by itself
+    hn.state.expo.as_mut().unwrap().closing = None;
+    hn.state.close_window(&wins[2]);
+    let t0 = Instant::now();
+    while hn.state.expo.is_some() {
+        hn.pump();
+        hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+        assert!(t0.elapsed() < Duration::from_secs(10), "the overview ended");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[test]
 fn a_wallpaper_picture_from_the_configuration_is_what_the_monitor_shows() {
     let dir = tempfile::tempdir().unwrap();
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

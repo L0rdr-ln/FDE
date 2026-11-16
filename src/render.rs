@@ -65,6 +65,11 @@ impl Fde {
         let title = self.window_title(window);
         let maximized = self.is_maximized(window);
         let (w, h) = (outer.size.w.max(1) as usize, outer.size.h.max(1) as usize);
+        // a frame is a picture in memory: a window of an absurd size gets none rather than a
+        // gigabyte of pixels
+        if w.saturating_mul(h) > 40_000_000 || w > 16_384 || h > 16_384 {
+            return Ok(None);
+        }
         let key = (w, h, focused, maximized, title.clone(), std::sync::Arc::as_ptr(theme) as usize);
         let cache_key = (surface.id(), (scale * 1000.0) as i32);
         if let Some(f) = self.ob_frames.get(&cache_key) {

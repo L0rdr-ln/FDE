@@ -102,7 +102,8 @@ impl<S: Read + Write> Client<S> {
     /// need no answer (info, error text) are collected.
     fn settle(&mut self, mut response: Response) -> std::io::Result<Step> {
         let mut notes = Vec::new();
-        loop {
+        // a greetd that never stops sending messages does not hold the greeter for ever
+        for _ in 0..64 {
             match response {
                 Response::Success => return Ok(Step::Authenticated),
                 Response::Error { error_type, description } => {
@@ -120,6 +121,7 @@ impl<S: Read + Write> Client<S> {
                 }
             }
         }
+        Err(std::io::Error::other("greetd sent too many messages in a row"))
     }
 
     /// Ask greetd to start logging `username` in.

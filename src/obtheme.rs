@@ -931,4 +931,41 @@ window.active.button.unpressed.image.color: #ffeedd
             }
         }
     }
+
+    /// A deterministic pile of nonsense in the shape of a themerc: parsing never panics and a
+    /// frame of any size can be drawn from whatever came out.
+    #[test]
+    fn hostile_theme_files_and_odd_sizes_do_not_panic() {
+        let mut seed = 0x1234_5678_9abc_def0u64;
+        let mut next = move || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            seed
+        };
+        let keys = ["window.active.title.bg", "window.active.title.bg.color", "window.active.title.bg.colorTo", "border.width", "padding.width", "padding.height", "window.client.padding.width", "window.label.text.justify", "window.active.label.bg", "window.active.button.unpressed.bg", "window.inactive.title.bg.border.color"];
+        let values = ["", ":", "Raised Gradient SplitVertical Bevel2 Interlaced Border", "#zzzzzz", "rgb:/", "rgb:fffff/0/0", "99999999999999999999", "-5", "4294967295", "\u{1F600}", "Parentrelative Parentrelative", "Sunken Solid", "#"];
+        for round in 0..300 {
+            let mut text = String::new();
+            for _ in 0..(next() % 30) {
+                let (k, v) = (keys[(next() % keys.len() as u64) as usize], values[(next() % values.len() as u64) as usize]);
+                text.push_str(&format!("{k}: {v}\n"));
+                if next() % 7 == 0 {
+                    text.push_str("garbage line without a colon\n:::\n\n! comment\n");
+                }
+            }
+            let t = ObTheme::parse(&text, "Fuzz", Path::new("/nonexistent"));
+            assert!(t.frame_width() <= 48 && t.title_height() <= 100, "round {round}: sizes stay sane");
+            for (w, h, scale, focused) in [(1usize, 1usize, 1.0f32, true), (3, 2, 1.0, false), (40, 20, 2.0, true), (7, 400, 1.5, false), (400, 7, 1.0, true), (0, 0, 1.0, true), (300, 200, 8.0, true), (64, 64, 0.1, false)] {
+                let buttons = [ButtonSpot { glyph: Glyph::Close, x: -10, y: -10, w: 30, h: 30 }, ButtonSpot { glyph: Glyph::Maximize, x: w as i32 + 5, y: 1, w: 0, h: 14 }];
+                let label = vec![255u8; 30 * 12 * 4];
+                let cv = render_frame(&t, &FrameSpec { w, h, scale, focused, label: Some(Label { rgba: &label, w: 30, h: 12 }), buttons: &buttons });
+                assert_eq!(cv.px.len(), w * h * 4);
+            }
+        }
+        // bitmaps of nonsense
+        for text in ["", "#define a_width 99999\n#define a_height 99999\nstatic char a[] = { 0x00 };", "#define a_width 0\n#define a_height 0\n{ }", "{{{{", "#define a_width 8\n#define a_height 8\nstatic char a[] = { 0xZZ, 0x1 };"] {
+            let _ = parse_xbm(text);
+        }
+    }
 }

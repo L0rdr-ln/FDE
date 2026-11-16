@@ -125,6 +125,8 @@ impl Fde {
         let t = 0.5 - ((1.0 - 2.0 * x).clamp(-1.0, 1.0).asin() / 3.0).sin();
         e.closing = Some(std::time::Instant::now() - std::time::Duration::from_secs_f32(t as f32 * EXPO_SECONDS));
         e.hover = None;
+        // a window that went away while the overview was open is not a choice
+        let chosen = chosen.filter(|w| smithay::utils::IsAlive::alive(w) && (self.space.elements().any(|e| e == w) || self.minimized.contains(w)));
         if let Some(w) = chosen {
             if self.minimized.contains(&w) {
                 self.restore_specific(&w);
@@ -158,6 +160,14 @@ impl Fde {
 
     /// Housekeeping each frame: the overview ends when its way back is done (or the screen locks).
     pub fn tick_expo(&mut self) {
+        // windows that closed meanwhile leave the overview (it ends with the last one)
+        if let Some(e) = self.expo.as_mut() {
+            e.windows.retain(|w| smithay::utils::IsAlive::alive(w));
+            if e.windows.is_empty() {
+                self.expo = None;
+                return;
+            }
+        }
         if self.expo.as_ref().is_some_and(|e| e.finished()) || (self.locked && self.expo.is_some()) {
             self.expo = None;
         }
