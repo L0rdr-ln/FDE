@@ -298,6 +298,11 @@ impl Fde {
             // wallpaper and bottom layers
             self.draw_layers(renderer, glass, scene, size, output, view, &[Layer::Background, Layer::Bottom])?;
 
+            // soap bubbles drifting up behind the windows
+            if self.bubbles_enabled() {
+                self.draw_bubbles(renderer, scene, size, out_rect, view)?;
+            }
+
             // windows, back to front
             let windows: Vec<Window> = self.space.elements().cloned().collect();
             let focus = self.seat.get_keyboard().and_then(|k| k.current_focus());
@@ -609,6 +614,15 @@ impl Fde {
                         glass.mesh.draw_part(&mut frame, &g.texture, (size.w, size.h), &points, crate::wobble::N, a, (0.0, 0.0, 1.0, 1.0))?;
                         let _ = frame.finish()?;
                     }
+                    crate::effects::CloseEffect::Burn => {
+                        let n = 2;
+                        let (x, y, w, h) = tex_rect;
+                        let corners = [(x as f32, y as f32), ((x + w) as f32, y as f32), (x as f32, (y + h) as f32), ((x + w) as f32, (y + h) as f32)];
+                        let mut target = renderer.bind(scene)?;
+                        let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+                        glass.mesh.draw_burn(&mut frame, &g.texture, (size.w, size.h), &corners, n, 1.0, t)?;
+                        let _ = frame.finish()?;
+                    }
                     crate::effects::CloseEffect::Shatter => {
                         let pieces = crate::effects::shatter(t as f64, tex_rect, 9, 6);
                         let mut target = renderer.bind(scene)?;
@@ -627,6 +641,16 @@ impl Fde {
             } else {
                 self.draw_layers(renderer, glass, scene, size, output, view, &[Layer::Top, Layer::Overlay])?;
             }
+        }
+
+        // the overview of all windows
+        if self.expo.is_some() && output == &self.output && !self.locked {
+            self.draw_expo(renderer, scene, size, view)?;
+        }
+
+        // rings spreading from clicks
+        if !self.ripples.is_empty() && self.ripples_enabled() {
+            self.draw_ripples(renderer, scene, size, out_rect, view)?;
         }
 
         // the window switcher: the windows as small pictures, the chosen one lit
@@ -918,21 +942,8 @@ impl Fde {
         // each window into a picture of its own
         let mut pictures: Vec<(GlesTexture, (f64, f64), f64)> = Vec::new();
         for (d, k) in &order {
-            let w = &windows[*k];
-            let g = w.geometry();
-            let (pw, ph) = (((g.size.w.max(1) as f64) * view.scale).round() as i32, ((g.size.h.max(1) as f64) * view.scale).round() as i32);
-            let mut tex = create_scene(renderer, (pw, ph).into())?;
-            let at = smithay::utils::Point::<i32, Physical>::from((-(g.loc.x as f64 * view.scale).round() as i32, -(g.loc.y as f64 * view.scale).round() as i32));
-            let elements = w.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(renderer, at, smithay::utils::Scale::from(view.scale), 1.0);
-            let own = Rectangle::<i32, Physical>::from_size((pw, ph).into());
-            {
-                let mut target = renderer.bind(&mut tex)?;
-                let mut frame = renderer.render(&mut target, (pw, ph).into(), Transform::Normal)?;
-                frame.clear(Color32F::new(0.0, 0.0, 0.0, 0.0), &[own])?;
-                draw_render_elements(&mut frame, view.scale, &elements, &[own])?;
-                let _ = frame.finish()?;
-            }
-            pictures.push((tex, (pw as f64, ph as f64), *d));
+            let (tex, pw, ph) = self.window_picture(renderer, &windows[*k], view.scale)?;
+            pictures.push((tex, (pw, ph), *d));
         }
         let title = windows.get(index).map(|w| self.window_title(w)).unwrap_or_default();
         let title_img = self.text.line(&title, size.w / 2, 18.0 * view.scale as f32, [255, 255, 255], Some(([8, 40, 90], 0.95)), (4.0 * view.scale) as i32);
@@ -961,6 +972,151 @@ impl Fde {
             let dest = Rectangle::<i32, Physical>::new(((size.w - tw) / 2, size.h - size.h / 8 - th / 2).into(), (*tw, *th).into());
             let src = Rectangle::<f64, BufferCoord>::from_size((*tw as f64, *th as f64).into());
             frame.render_texture_from_to(tex, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, 1.0, None, &[])?;
+        }
+        let _ = frame.finish()?;
+        Ok(())
+    }
+
+    /// The window's contents (without its frame) drawn into a texture of its own, at `scale`
+    /// physical pixels per logical one: the texture and its size in pixels.
+    fn window_picture(&mut self, renderer: &mut GlesRenderer, w: &Window, scale: f64) -> Result<(GlesTexture, f64, f64), GlesError> {
+        let g = w.geometry();
+        let (pw, ph) = (((g.size.w.max(1) as f64) * scale).round() as i32, ((g.size.h.max(1) as f64) * scale).round() as i32);
+        let mut tex = create_scene(renderer, (pw, ph).into())?;
+        let at = smithay::utils::Point::<i32, Physical>::from((-(g.loc.x as f64 * scale).round() as i32, -(g.loc.y as f64 * scale).round() as i32));
+        let elements = w.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(renderer, at, smithay::utils::Scale::from(scale), 1.0);
+        let own = Rectangle::<i32, Physical>::from_size((pw, ph).into());
+        {
+            let mut target = renderer.bind(&mut tex)?;
+            let mut frame = renderer.render(&mut target, (pw, ph).into(), Transform::Normal)?;
+            frame.clear(Color32F::new(0.0, 0.0, 0.0, 0.0), &[own])?;
+            draw_render_elements(&mut frame, scale, &elements, &[own])?;
+            let _ = frame.finish()?;
+        }
+        Ok((tex, pw as f64, ph as f64))
+    }
+
+    /// The overview: the windows glide from where they are to their places side by side.
+    fn draw_expo(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        scene: &mut GlesTexture,
+        size: Size<i32, Physical>,
+        view: View,
+    ) -> Result<(), GlesError> {
+        let full = Rectangle::<i32, Physical>::from_size(size);
+        let (windows, hover, p) = match &self.expo {
+            Some(e) => (e.windows.clone(), e.hover, e.progress()),
+            None => return Ok(()),
+        };
+        let cells = self.expo_cells();
+        let to_phys = |r: Rectangle<f64, Logical>| -> crate::expo::Cell {
+            ((r.loc.x - view.origin.x as f64) * view.scale, (r.loc.y - view.origin.y as f64) * view.scale, r.size.w * view.scale, r.size.h * view.scale)
+        };
+        let mut pictures = Vec::new();
+        let mut titles = Vec::new();
+        for (i, w) in windows.iter().enumerate() {
+            let Some(cell) = cells.get(i).copied() else { continue };
+            let target = to_phys(cell);
+            // where it is now; a minimized window grows out of its place
+            let (start, mapped) = match self.space.element_geometry(w) {
+                Some(g) if self.minimize_progress(w).is_none() => (to_phys(Rectangle::new((g.loc.x as f64, g.loc.y as f64).into(), (g.size.w as f64, g.size.h as f64).into())), true),
+                _ => ((target.0 + target.2 * 0.25, target.1 + target.3 * 0.25, target.2 * 0.5, target.3 * 0.5), false),
+            };
+            let at = crate::expo::mix(start, target, p);
+            let (tex, _, _) = self.window_picture(renderer, w, view.scale)?;
+            let alpha = if mapped { 1.0 } else { p as f32 };
+            pictures.push((tex, at, alpha, hover == Some(i), target));
+            let title = self.window_title(w);
+            if let Some(img) = self.text.line(&title, (target.2 as i32).max(120), 15.0 * view.scale as f32, [255, 255, 255], Some(([8, 40, 90], 0.95)), (3.0 * view.scale) as i32) {
+                let tex = renderer.import_memory(&img.rgba, Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((img.width, img.height)), false)?;
+                titles.push((tex, (target.0 + (target.2 - img.width as f64) / 2.0, target.1 + target.3 + 8.0 * view.scale), img.width, img.height));
+            }
+        }
+        let backdrop = self.wallpapers.get(&(size.w, size.h)).cloned();
+        let mut target = renderer.bind(scene)?;
+        let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+        // the desktop fades out as the windows spread
+        if let Some(wp) = backdrop {
+            let src = Rectangle::<f64, BufferCoord>::from_size((wp.size().w as f64, wp.size().h as f64).into());
+            frame.render_texture_from_to(&wp, src, full, &[full], &[], Transform::Normal, (p * 2.0).min(1.0) as f32, None, &[])?;
+        }
+        frame.draw_solid(full, &[full], Color32F::new(0.0, 0.02, 0.07, (0.55 * p) as f32))?;
+        let pad = (10.0 * view.scale) as i32;
+        for (tex, at, alpha, lit, target) in &pictures {
+            if *lit {
+                let r = Rectangle::<i32, Physical>::new(((target.0) as i32 - pad, (target.1) as i32 - pad).into(), ((target.2) as i32 + 2 * pad, (target.3) as i32 + 2 * pad).into());
+                frame.draw_solid(r, &[Rectangle::from_size(r.size)], Color32F::new(0.45, 0.75, 1.0, (0.5 * p) as f32))?;
+            }
+            let dest = Rectangle::<i32, Physical>::new((at.0.round() as i32, at.1.round() as i32).into(), (at.2.round().max(1.0) as i32, at.3.round().max(1.0) as i32).into());
+            let src = Rectangle::<f64, BufferCoord>::from_size((tex.size().w as f64, tex.size().h as f64).into());
+            frame.render_texture_from_to(tex, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, *alpha, None, &[])?;
+        }
+        for (tex, (x, y), tw, th) in &titles {
+            let dest = Rectangle::<i32, Physical>::new((x.round() as i32, y.round() as i32).into(), (*tw, *th).into());
+            let src = Rectangle::<f64, BufferCoord>::from_size((*tw as f64, *th as f64).into());
+            frame.render_texture_from_to(tex, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, p as f32, None, &[])?;
+        }
+        let _ = frame.finish()?;
+        Ok(())
+    }
+
+    /// The bubble and ring pictures, made when first needed.
+    fn sprites(&mut self, renderer: &mut GlesRenderer) -> Result<(GlesTexture, GlesTexture), GlesError> {
+        if self.sprites.is_none() {
+            let n = 128usize;
+            let bubble = renderer.import_memory(&crate::effects::bubble_sprite(n), Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((n as i32, n as i32)), false)?;
+            let ring = renderer.import_memory(&crate::effects::ring_sprite(n), Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((n as i32, n as i32)), false)?;
+            self.sprites = Some((bubble, ring));
+        }
+        Ok(self.sprites.clone().expect("made above"))
+    }
+
+    fn draw_bubbles(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        scene: &mut GlesTexture,
+        size: Size<i32, Physical>,
+        out_rect: Rectangle<i32, Logical>,
+        view: View,
+    ) -> Result<(), GlesError> {
+        let (bubble, _) = self.sprites(renderer)?;
+        let t = self.started.elapsed().as_secs_f64();
+        let count = 14;
+        let list = crate::effects::bubbles(t, out_rect.size.w as f64, out_rect.size.h as f64, count);
+        let src = Rectangle::<f64, BufferCoord>::from_size((bubble.size().w as f64, bubble.size().h as f64).into());
+        let mut target = renderer.bind(scene)?;
+        let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+        for b in list.iter().filter(|b| b.alpha > 0.004) {
+            let side = (b.size * view.scale).round() as i32;
+            let dest = Rectangle::<i32, Physical>::new(((b.x * view.scale) as i32 - side / 2, (b.y * view.scale) as i32 - side / 2).into(), (side, side).into());
+            frame.render_texture_from_to(&bubble, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, b.alpha as f32, None, &[])?;
+        }
+        let _ = frame.finish()?;
+        Ok(())
+    }
+
+    fn draw_ripples(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        scene: &mut GlesTexture,
+        size: Size<i32, Physical>,
+        out_rect: Rectangle<i32, Logical>,
+        view: View,
+    ) -> Result<(), GlesError> {
+        let (_, ring) = self.sprites(renderer)?;
+        let src = Rectangle::<f64, BufferCoord>::from_size((ring.size().w as f64, ring.size().h as f64).into());
+        let mut target = renderer.bind(scene)?;
+        let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+        for (p, since) in &self.ripples {
+            if p.x < out_rect.loc.x as f64 || p.y < out_rect.loc.y as f64 || p.x >= (out_rect.loc.x + out_rect.size.w) as f64 || p.y >= (out_rect.loc.y + out_rect.size.h) as f64 {
+                continue;
+            }
+            let (radius, alpha) = crate::effects::ripple((since.elapsed().as_secs_f32() / crate::effects::RIPPLE_SECONDS) as f64);
+            let side = (radius * 2.0 * view.scale).round() as i32;
+            let (cx, cy) = (((p.x - view.origin.x as f64) * view.scale) as i32, ((p.y - view.origin.y as f64) * view.scale) as i32);
+            let dest = Rectangle::<i32, Physical>::new((cx - side / 2, cy - side / 2).into(), (side, side).into());
+            frame.render_texture_from_to(&ring, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, alpha as f32, None, &[])?;
         }
         let _ = frame.finish()?;
         Ok(())

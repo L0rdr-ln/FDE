@@ -27,6 +27,10 @@ pub struct Appearance {
     /// windows bend and swing on springs while they are dragged
     pub wobbly_windows: bool,
     /// how a minimized window goes to the task bar: `lamp` (poured into its button like a genie) or `shrink`
+    /// soap bubbles drift up behind the windows (off by default: they keep the screen redrawing)
+    pub bubbles: bool,
+    /// a ring spreads from every click
+    pub click_ripples: bool,
     pub minimize_effect: String,
     /// how a new window appears: `unfold` (rolls down from its title bar) or `pop` (fades in)
     pub open_effect: String,
@@ -34,7 +38,7 @@ pub struct Appearance {
     pub workspace_effect: String,
     /// Alt+Tab: `flip3d` (the windows as a turned stack) or `strip` (small pictures in a row)
     pub switcher_effect: String,
-    /// how a closed window goes away: `shatter` (breaks like glass), `fold` (switched off like a television) or `fade`
+    /// how a closed window goes away: `shatter` (breaks like glass), `fold` (switched off like a television), `burn` (burns away) or `fade`
     pub close_effect: String,
     /// "auto" (fast mode when the graphics are software-drawn, as in a VM without 3D), "quality" or "fast" (one blur pass, no drop shadows, no wobble)
     pub performance: String,
@@ -46,7 +50,7 @@ pub struct Appearance {
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.46, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, minimize_effect: "lamp".into(), open_effect: "unfold".into(), workspace_effect: "cube".into(), switcher_effect: "flip3d".into(), close_effect: "shatter".into(), performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
+        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.46, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, bubbles: false, click_ripples: true, minimize_effect: "lamp".into(), open_effect: "unfold".into(), workspace_effect: "cube".into(), switcher_effect: "flip3d".into(), close_effect: "shatter".into(), performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
     }
 }
 
@@ -310,8 +314,8 @@ impl Config {
         if !["flip3d", "strip"].contains(&self.appearance.switcher_effect.as_str()) {
             return Err("appearance.switcher_effect must be \"flip3d\" or \"strip\"".into());
         }
-        if !["shatter", "glass", "fold", "tv", "fade"].contains(&self.appearance.close_effect.as_str()) {
-            return Err("appearance.close_effect must be \"shatter\", \"fold\" or \"fade\"".into());
+        if !["shatter", "glass", "fold", "tv", "burn", "fire", "fade"].contains(&self.appearance.close_effect.as_str()) {
+            return Err("appearance.close_effect must be \"shatter\", \"fold\", \"burn\" or \"fade\"".into());
         }
         crate::theme::Theme::find(&self.appearance.theme).map_err(|e| format!("appearance.theme: {e}"))?;
         parse_color(&self.appearance.accent).ok_or_else(|| format!("appearance.accent: \"{}\" is not #rrggbb", self.appearance.accent))?;

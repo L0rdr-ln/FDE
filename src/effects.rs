@@ -22,6 +22,8 @@ pub enum CloseEffect {
     Fold,
     /// breaks into pieces of glass that fall
     Shatter,
+    /// burns away from the bottom, edges glowing
+    Burn,
 }
 
 impl MinimizeEffect {
@@ -45,6 +47,7 @@ impl CloseEffect {
         match s {
             "shatter" | "glass" => CloseEffect::Shatter,
             "fold" | "tv" => CloseEffect::Fold,
+            "burn" | "fire" => CloseEffect::Burn,
             _ => CloseEffect::Fade,
         }
     }
@@ -54,6 +57,7 @@ impl CloseEffect {
             CloseEffect::Fade => 0.18,
             CloseEffect::Fold => 0.4,
             CloseEffect::Shatter => 0.8,
+            CloseEffect::Burn => 1.2,
         }
     }
 }
@@ -229,6 +233,99 @@ pub fn flip(d: f64, w: f64, h: f64, pw: f64, ph: f64, n: usize) -> (Vec<(f32, f3
     (pts, alpha as f32)
 }
 
+/// A soap bubble: a see-through ball with a bright rim and a shine, `n` x `n` pixels,
+/// premultiplied RGBA.
+pub fn bubble_sprite(n: usize) -> Vec<u8> {
+    let mut out = vec![0u8; n * n * 4];
+    let r = n as f64 / 2.0 - 1.0;
+    for y in 0..n {
+        for x in 0..n {
+            let (dx, dy) = ((x as f64 + 0.5 - n as f64 / 2.0) / r, (y as f64 + 0.5 - n as f64 / 2.0) / r);
+            let d = (dx * dx + dy * dy).sqrt();
+            if d > 1.0 {
+                continue;
+            }
+            let inside = 1.0 - smooth((d - 0.97) / 0.03);
+            // faint body, bright rim
+            let mut a = (0.04 + 0.10 * d * d) * inside + 0.55 * smooth((d - 0.78) / 0.19) * inside;
+            let mut c = [0.85, 0.95, 1.0];
+            // lower right: light coming through, a little warmer
+            let lr = ((dx + dy) / 2.0).max(0.0) * smooth((d - 0.55) / 0.4);
+            a += 0.25 * lr;
+            c = [c[0] + 0.1 * lr, c[1] + 0.03 * lr, c[2] - 0.08 * lr];
+            // the shine, up left
+            let (sx, sy) = (dx + 0.38, dy + 0.42);
+            let sd = (sx * sx / 0.8 + sy * sy * 1.4).sqrt();
+            let shine = (1.0 - smooth(sd / 0.2)) * 0.9;
+            a = a + shine * (1.0 - a);
+            let a = a.clamp(0.0, 1.0);
+            let i = (y * n + x) * 4;
+            for k in 0..3 {
+                out[i + k] = (c[k].clamp(0.0, 1.0) * a * 255.0).round() as u8;
+            }
+            out[i + 3] = (a * 255.0).round() as u8;
+        }
+    }
+    out
+}
+
+/// A thin soft ring (for a ripple), `n` x `n` pixels, premultiplied RGBA.
+pub fn ring_sprite(n: usize) -> Vec<u8> {
+    let mut out = vec![0u8; n * n * 4];
+    let r = n as f64 / 2.0 - 1.0;
+    for y in 0..n {
+        for x in 0..n {
+            let (dx, dy) = ((x as f64 + 0.5 - n as f64 / 2.0) / r, (y as f64 + 0.5 - n as f64 / 2.0) / r);
+            let d = (dx * dx + dy * dy).sqrt();
+            // a band around 0.9, soft on both sides
+            let a = (smooth((d - 0.72) / 0.18) * (1.0 - smooth((d - 0.92) / 0.08))).clamp(0.0, 1.0) * 0.9;
+            let i = (y * n + x) * 4;
+            out[i] = (0.9 * a * 255.0).round() as u8;
+            out[i + 1] = (0.97 * a * 255.0).round() as u8;
+            out[i + 2] = (a * 255.0).round() as u8;
+            out[i + 3] = (a * 255.0).round() as u8;
+        }
+    }
+    out
+}
+
+/// Where a bubble is: its middle, its width and how opaque it is.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bubble {
+    pub x: f64,
+    pub y: f64,
+    pub size: f64,
+    pub alpha: f64,
+}
+
+/// `count` bubbles rising through a screen of `w` x `h` at time `t` seconds: each has its own
+/// size, speed and sway, comes up from below the bottom edge and leaves above the top, fading at
+/// both ends. The same time gives the same picture.
+pub fn bubbles(t: f64, w: f64, h: f64, count: usize) -> Vec<Bubble> {
+    (0..count)
+        .map(|i| {
+            let period = 16.0 + 16.0 * noise(i, 0, 11);
+            let u = (t / period + noise(i, 1, 12)).rem_euclid(1.0);
+            let size = 16.0 + 84.0 * noise(i, 5, 16).powi(2);
+            let sway = 18.0 + 34.0 * noise(i, 3, 14);
+            let x = w * (0.04 + 0.92 * noise(i, 2, 13)) + sway * (t * (0.35 + 0.4 * noise(i, 4, 15)) + i as f64 * 1.7).sin();
+            let y = h + size / 2.0 - u * (h + size);
+            let fade = smooth(u / 0.08) * (1.0 - smooth((u - 0.9) / 0.1));
+            Bubble { x, y, size, alpha: 0.85 * fade }
+        })
+        .collect()
+}
+
+/// A ripple `t` (0 .. 1) of the way: the radius of its ring and how opaque it is.
+pub fn ripple(t: f64) -> (f64, f64) {
+    let t = t.clamp(0.0, 1.0);
+    let e = 1.0 - (1.0 - t).powi(3);
+    (10.0 + 70.0 * e, 0.85 * (1.0 - t).powf(1.4))
+}
+
+/// How long a click ripple lasts.
+pub const RIPPLE_SECONDS: f32 = 0.7;
+
 /// One torn-off piece of a window: its four corners (top left, top right, bottom left, bottom
 /// right), the part of the picture it carries (left, top, right, bottom, each 0 .. 1) and how
 /// opaque it is.
@@ -299,6 +396,7 @@ mod tests {
         assert_eq!(MinimizeEffect::parse("whatever"), MinimizeEffect::Shrink);
         assert_eq!(CloseEffect::parse("shatter"), CloseEffect::Shatter);
         assert_eq!(CloseEffect::parse("fold"), CloseEffect::Fold);
+        assert_eq!(CloseEffect::parse("burn"), CloseEffect::Burn);
         assert_eq!(CloseEffect::parse(""), CloseEffect::Fade);
     }
 
@@ -469,5 +567,62 @@ mod tests {
         // fractions in between are continuous
         let a = flip(0.5, w, h, 700.0, 500.0, n).0[0].0;
         assert!(a > left(&front) && a < left(&second));
+    }
+
+    #[test]
+    fn a_bubble_is_clear_inside_bright_at_the_rim_with_a_shine() {
+        let n = 64;
+        let px = bubble_sprite(n);
+        let alpha = |x: usize, y: usize| px[(y * n + x) * 4 + 3] as f64 / 255.0;
+        assert!(alpha(32, 32) < 0.25, "see-through in the middle: {}", alpha(32, 32));
+        assert!(alpha(32, 3) > 0.35 && alpha(60, 32) > 0.35, "the rim shows");
+        assert!(alpha(0, 0) == 0.0 && alpha(63, 63) == 0.0, "nothing outside the circle");
+        let shine = alpha(32 - 12, 32 - 14);
+        assert!(shine > 0.6, "a bright shine up left: {shine}");
+        // premultiplied: colour never exceeds alpha
+        assert!(px.chunks(4).all(|p| p[0] <= p[3] && p[1] <= p[3] && p[2] <= p[3]));
+    }
+
+    #[test]
+    fn a_ring_is_hollow() {
+        let n = 64;
+        let px = ring_sprite(n);
+        let alpha = |x: usize, y: usize| px[(y * n + x) * 4 + 3];
+        assert_eq!(alpha(32, 32), 0);
+        assert!(alpha(32 + 28, 32) > 150, "the ring is near the edge");
+        assert_eq!(alpha(0, 0), 0);
+    }
+
+    #[test]
+    fn bubbles_rise_sway_and_fade_at_the_ends() {
+        let (w, h) = (1280.0, 800.0);
+        let a = bubbles(10.0, w, h, 12);
+        assert_eq!(a.len(), 12);
+        assert_eq!(a, bubbles(10.0, w, h, 12), "the same time, the same picture");
+        let b = bubbles(10.5, w, h, 12);
+        let rising = a.iter().zip(&b).filter(|(p, q)| q.y < p.y).count();
+        assert!(rising >= 11, "they go up ({rising} of 12)");
+        // always inside the screen's width (with the sway) and never out of the 0..1 opacity
+        for t in 0..400 {
+            for bub in bubbles(t as f64 * 0.37, w, h, 12) {
+                assert!(bub.x > -60.0 && bub.x < w + 60.0, "x {}", bub.x);
+                assert!((0.0..=1.0).contains(&bub.alpha));
+                assert!(bub.size >= 16.0 && bub.size <= 100.0);
+                if bub.y > h + bub.size / 2.0 - 1.0 || bub.y < -bub.size / 2.0 + 1.0 {
+                    assert!(bub.alpha < 0.05, "invisible when it is off the screen");
+                }
+            }
+        }
+        // different bubbles differ
+        assert!(a.windows(2).any(|p| (p[0].size - p[1].size).abs() > 1.0));
+    }
+
+    #[test]
+    fn a_ripple_spreads_and_fades() {
+        let (r0, a0) = ripple(0.0);
+        let (r1, a1) = ripple(0.5);
+        let (r2, a2) = ripple(1.0);
+        assert!(r0 < r1 && r1 < r2);
+        assert!(a0 > a1 && a1 > a2 && a2 < 0.01);
     }
 }
