@@ -77,7 +77,7 @@ impl Fde {
         if self.has_frame(window) {
             self.style
         } else {
-            GlassStyle { border: 0.0, titlebar: 0.0, ..self.style }
+            GlassStyle { border: 0.0, titlebar: 0.0, handle: 0.0, ..self.style }
         }
     }
 
@@ -631,6 +631,7 @@ impl Fde {
         self.ghosts.retain(|g| g.since.elapsed().as_secs_f32() < g.effect.seconds());
         self.retile();
         self.tick_expo();
+        self.check_hot_corner();
         self.ripples.retain(|(_, t)| t.elapsed().as_secs_f32() < crate::effects::RIPPLE_SECONDS);
         if self.cube.as_ref().is_some_and(|c| c.since.elapsed().as_secs_f32() >= crate::effects::CUBE_SECONDS) {
             self.cube = None;

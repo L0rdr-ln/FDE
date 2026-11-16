@@ -62,7 +62,7 @@ enum Action {
 pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+Return", "open a terminal"),
     ("Alt+Tab", "switch windows (hold Alt; Shift+Tab goes back)"),
-    ("Super+Tab", "the overview of all windows (click one; Esc leaves)"),
+    ("Super+Tab", "the overview of all windows (click one, or drag it onto a workspace; Esc leaves)"),
     ("Alt+Q / Alt+F4", "close the window"),
     ("Alt+F", "maximize or restore"),
     ("Alt+Left / Right", "snap to the left or right half"),
@@ -564,6 +564,12 @@ impl Fde {
         self.super_alone = false;
         let serial = SERIAL_COUNTER.next_serial();
         let pos = self.pointer_location;
+        if button == BTN_LEFT {
+            self.button_down = pressed;
+            if self.ob_theme.is_some() {
+                self.request_redraw();
+            }
+        }
         if pressed && !self.locked && self.config.appearance.click_ripples && self.ripples_enabled() {
             self.ripples.push((pos, std::time::Instant::now()));
             self.ripples.truncate(8);
@@ -572,10 +578,11 @@ impl Fde {
         if self.locked {
             // straight to the lock screen
         } else if pressed && self.expo.is_some() {
-            self.expo_click(pos);
-            self.swallow_release = true;
+            self.expo_press(pos);
             return;
         } else if !pressed && self.expo.is_some() {
+            self.expo_release(pos);
+            self.swallow_release = false;
             return;
         } else if pressed && self.window_menu.is_some() {
             // a row is chosen, a click anywhere else closes the menu; the click goes nowhere else

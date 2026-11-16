@@ -26,9 +26,10 @@ pub enum Hit {
 pub fn outer_rect(client: Rectangle<i32, Logical>, style: &GlassStyle) -> Rectangle<i32, Logical> {
     let b = style.border as i32;
     let t = style.titlebar as i32;
+    let hd = style.handle as i32;
     Rectangle::new(
         (client.loc.x - b, client.loc.y - b - t).into(),
-        (client.size.w + 2 * b, client.size.h + 2 * b + t).into(),
+        (client.size.w + 2 * b, client.size.h + 2 * b + t + hd).into(),
     )
 }
 
@@ -36,9 +37,10 @@ pub fn outer_rect(client: Rectangle<i32, Logical>, style: &GlassStyle) -> Rectan
 pub fn client_rect(outer: Rectangle<i32, Logical>, style: &GlassStyle) -> Rectangle<i32, Logical> {
     let b = style.border as i32;
     let t = style.titlebar as i32;
+    let hd = style.handle as i32;
     Rectangle::new(
         (outer.loc.x + b, outer.loc.y + b + t).into(),
-        ((outer.size.w - 2 * b).max(1), (outer.size.h - 2 * b - t).max(1)).into(),
+        ((outer.size.w - 2 * b).max(1), (outer.size.h - 2 * b - t - hd).max(1)).into(),
     )
 }
 
@@ -117,11 +119,16 @@ pub fn hit(client: Rectangle<i32, Logical>, style: &GlassStyle, p: Point<f64, Lo
             return Some(Hit::Button(b));
         }
     }
+    // the handle at the bottom is a resize grip all along; its two ends (the grips) take the
+    // corner with it
+    let bottom_zone = grip.max(style.border as f64 + style.handle as f64);
+    let in_handle = style.handle > 0.5 && p.y >= y1 - bottom_zone;
+    let side = if in_handle { grip.max(25.0) } else { grip };
     let edges = Edges {
-        left: p.x < x0 + grip,
-        right: p.x >= x1 - grip,
+        left: p.x < x0 + side,
+        right: p.x >= x1 - side,
         top: p.y < y0 + grip.min(5.0),
-        bottom: p.y >= y1 - grip,
+        bottom: p.y >= y1 - bottom_zone,
     };
     if edges.left || edges.right || edges.top || edges.bottom {
         return Some(Hit::Border(edges));
@@ -159,5 +166,25 @@ mod tests {
             other => panic!("{other:?}"),
         }
         assert_eq!(hit(client, &style, (10.0, 10.0).into()), None);
+    }
+
+    #[test]
+    fn a_handle_adds_to_the_bottom_and_is_a_grip() {
+        let style = GlassStyle { handle: 6.0, border: 3.0, titlebar: 20.0, ..GlassStyle::default() };
+        let client = Rectangle::<i32, Logical>::new((100, 100).into(), (400, 300).into());
+        let outer = outer_rect(client, &style);
+        assert_eq!(outer.size.h, 300 + 6 + 20 + 6);
+        assert_eq!(client_rect(outer, &style), client);
+        // the bottom edge, along the whole handle, resizes the bottom; its ends the corners
+        let (bx, by) = (outer.loc.x as f64 + 200.0, outer.loc.y as f64 + outer.size.h as f64 - 2.0);
+        match hit(client, &style, (bx, by).into()) {
+            Some(Hit::Border(e)) => assert!(e.bottom && !e.left && !e.right),
+            other => panic!("{other:?}"),
+        }
+        match hit(client, &style, (outer.loc.x as f64 + 10.0, by).into()) {
+            Some(Hit::Border(e)) => assert!(e.bottom && e.left),
+            other => panic!("{other:?}"),
+        }
+        assert_eq!(hit(client, &style, (300.0, 250.0).into()), Some(Hit::Client));
     }
 }

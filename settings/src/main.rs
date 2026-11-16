@@ -529,6 +529,12 @@ fn shell_page(cfg: &Config, status: &Status) -> GBox {
     let st7 = status.clone();
     tile.connect_active_notify(move |sw| st7.report(config::set(&path(), &model::tiling(sw.is_active()))));
     body.append(&row("Tile windows on every workspace (Alt+T switches one)", &tile));
+    let corner = gtk4::Switch::new();
+    corner.set_active(cfg.shell.hot_corner);
+    corner.set_halign(Align::Start);
+    let st8 = status.clone();
+    corner.connect_active_notify(move |sw| st8.report(config::set(&path(), &model::hot_corner(sw.is_active()))));
+    body.append(&row("Top left corner opens the overview", &corner));
     let note = Label::new(Some("The task bar starts and stops with the next session."));
     note.add_css_class("hint");
     note.set_halign(Align::Start);

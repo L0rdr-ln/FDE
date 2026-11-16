@@ -27,7 +27,8 @@ is the first thing to do (see "Next").
 - [ ] touch and tablet input, input methods (CJK typing), keyboard-shortcut inhibit
 - [ ] turning displays off when idle (DPMS), variable refresh rate, HDR and colour management,
       direct scanout, multi-GPU laptops
-- [ ] window rules, session restore, hot corners
+- [x] hot corner for the overview (`shell.hot_corner`), drag windows to a workspace in the overview
+- [ ] window rules, session restore
 
 ## Shell
 - [x] `fde-panel`: task bar (start orb, task list, clock, workspace dots, volume and battery),

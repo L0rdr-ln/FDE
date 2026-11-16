@@ -1740,9 +1740,11 @@ fn the_overview_lays_out_all_windows_and_a_click_picks_one() {
     let c2 = cells[2];
     hn.state.pointer_location = (c2.loc.x + c2.size.w / 2.0, c2.loc.y + c2.size.h / 2.0).into();
     hn.state.pointer_button(0x110, true, 0);
+    assert!(hn.state.expo.as_ref().unwrap().drag.is_some(), "the window is picked up");
+    hn.state.pointer_button(0x110, false, 1);
     assert_eq!(hn.state.space.elements().last().cloned().unwrap(), deepest, "the chosen window is in front now");
     assert!(hn.state.expo.as_ref().unwrap().closing.is_some(), "the windows glide back");
-    hn.state.pointer_button(0x110, false, 1);
+    assert!(!hn.state.swallow_release, "no click is swallowed later");
     hn.state.expo.as_mut().unwrap().closing = Some(Instant::now() - Duration::from_secs(5));
     hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
     assert!(hn.state.expo.is_none(), "the overview is over");
@@ -1785,7 +1787,7 @@ fn an_openbox_theme_gives_windows_its_frame() {
     config.apply_style(&mut hn.state.style);
     hn.state.ob_theme = config.openbox_theme();
     assert!(hn.state.ob_theme.is_some() && hn.state.style.openbox > 0.5);
-    assert_eq!((hn.state.style.border, hn.state.style.titlebar), (2.0, 22.0), "the theme's sizes: 2 px border, 14 + 2 x 4 title");
+    assert_eq!((hn.state.style.border, hn.state.style.titlebar, hn.state.style.handle), (2.0, 22.0, 6.0), "the theme's sizes: 2 px border, 14 + 2 x 4 title, the standard 6 px handle");
     hn.state.config.appearance.open_effect = "pop".into();
     open_window(&mut hn, dir.path(), "fde-e2e-openbox", 300, 200);
     let win = hn.state.space.elements().next().cloned().unwrap();
@@ -1903,6 +1905,73 @@ fn many_windows_in_tiling_mode_and_fast_workspace_switching_with_the_cube_stay_s
     hn.state.cube = None;
     hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
     assert!(hn.state.workspace < 4);
+}
+
+#[test]
+fn the_overview_carries_a_window_to_another_workspace_and_the_hot_corner_opens_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-expodrag") else { return };
+    hn.state.config.appearance.bubbles = false;
+    hn.state.config.appearance.open_effect = "pop".into();
+    hn.state.config.appearance.workspace_effect = "none".into();
+    for _ in 0..3 {
+        open_window(&mut hn, dir.path(), "fde-e2e-expodrag", 300, 200);
+    }
+    let wins: Vec<_> = hn.state.space.elements().cloned().collect();
+    for w in &wins {
+        hn.state.set_open_start(w, Instant::now() - Duration::from_secs(10));
+    }
+    // the hot corner is off by default; on, the pointer must stay a moment
+    hn.state.pointer_location = (0.0, 0.0).into();
+    hn.state.check_hot_corner();
+    assert!(hn.state.expo.is_none() && hn.state.corner_since.is_none(), "off by default");
+    hn.state.config.shell.hot_corner = true;
+    hn.state.check_hot_corner();
+    assert!(hn.state.corner_since.is_some() && hn.state.expo.is_none(), "it waits");
+    hn.state.corner_since = Some(Instant::now() - Duration::from_secs(1));
+    hn.state.check_hot_corner();
+    assert!(hn.state.expo.is_some(), "after a moment in the corner the overview opens");
+    hn.state.expo = None;
+    hn.state.check_hot_corner();
+    assert!(hn.state.expo.is_none(), "not again while the pointer stays in the corner");
+    hn.state.pointer_location = (400.0, 300.0).into();
+    hn.state.check_hot_corner();
+    assert!(hn.state.corner_armed, "armed again once the pointer left");
+
+    hn.state.toggle_expo();
+    hn.state.expo.as_mut().unwrap().since = Instant::now() - Duration::from_secs(5);
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let strip = hn.state.expo_strip();
+    assert_eq!(strip.len(), hn.state.workspace_count());
+    let cells = hn.state.expo_cells();
+    let carried = hn.state.expo.as_ref().unwrap().windows[1].clone();
+    // pick up the second window, carry it a long way, drop it on workspace 2's button
+    let from = (cells[1].loc.x + cells[1].size.w / 2.0, cells[1].loc.y + cells[1].size.h / 2.0);
+    hn.state.pointer_location = from.into();
+    hn.state.pointer_button(0x110, true, 0);
+    assert!(hn.state.expo.as_ref().unwrap().drag.is_some());
+    let to = (strip[1].loc.x + strip[1].size.w / 2.0, strip[1].loc.y + strip[1].size.h / 2.0);
+    hn.state.pointer_location = to.into();
+    hn.state.expo_motion(to.into());
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap(); // drawn while carried
+    let frame = grab_scene(&mut renderer, &mut scene);
+    dump_frame(&frame, 800, 600, "expodrag", 0);
+    hn.state.pointer_button(0x110, false, 1);
+    assert_eq!(hn.state.window_workspace_of(&carried), 1, "the window went to workspace 2");
+    assert!(!hn.state.space.elements().any(|w| *w == carried), "and left this one");
+    assert_eq!(hn.state.expo.as_ref().map(|e| e.windows.len()), Some(2), "the overview shows what is left");
+    assert_eq!(hn.state.workspace, 0, "we stay where we are");
+    assert!(!hn.state.swallow_release);
+
+    // a click on a workspace button goes there
+    let strip = hn.state.expo_strip();
+    hn.state.pointer_location = (strip[1].loc.x + 4.0, strip[1].loc.y + 4.0).into();
+    hn.state.pointer_button(0x110, true, 2);
+    assert_eq!(hn.state.workspace, 1, "the click switched workspace");
+    assert!(hn.state.expo.as_ref().unwrap().closing.is_some());
+    hn.state.pointer_button(0x110, false, 3);
+    assert!(hn.state.space.elements().any(|w| *w == carried), "the window is on the screen now");
 }
 
 #[test]

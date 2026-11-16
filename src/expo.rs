@@ -42,6 +42,20 @@ pub fn layout(sizes: &[(f64, f64)], w: f64, h: f64) -> Vec<Cell> {
     out
 }
 
+/// The buttons of the workspaces along the top of the overview (`count` of them, centred): each is
+/// about 110 x 56 pixels, smaller on a small screen.
+pub fn strip(count: usize, w: f64, h: f64) -> Vec<Cell> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let bh = (0.07 * h).clamp(30.0, 56.0);
+    let bw = (bh * 1.9).min((w - 24.0) / count as f64 - 10.0).max(24.0);
+    let gap = 10.0;
+    let total = count as f64 * bw + (count as f64 - 1.0) * gap;
+    let x0 = (w - total) / 2.0;
+    (0..count).map(|i| (x0 + i as f64 * (bw + gap), 10.0, bw, bh)).collect()
+}
+
 /// `a` to `b` by `t` (0 .. 1), cell by cell.
 pub fn mix(a: Cell, b: Cell, t: f64) -> Cell {
     let l = |x: f64, y: f64| x + (y - x) * t;
@@ -49,7 +63,18 @@ pub fn mix(a: Cell, b: Cell, t: f64) -> Cell {
 }
 
 /// The overview while it is open.
+/// A window being carried across the overview with the button down.
+#[derive(Debug, Clone)]
+pub struct ExpoDrag {
+    pub index: usize,
+    pub start: Point<f64, Logical>,
+    pub at: Point<f64, Logical>,
+    /// the pointer went far enough for this to be a drag and not a click
+    pub moved: bool,
+}
+
 pub struct Expo {
+    pub drag: Option<ExpoDrag>,
     pub since: std::time::Instant,
     /// leaving: since when (the windows glide back)
     pub closing: Option<std::time::Instant>,
@@ -98,7 +123,7 @@ impl Fde {
             return;
         }
         self.switcher = None;
-        self.expo = Some(Expo { since: std::time::Instant::now(), closing: None, windows, hover: None });
+        self.expo = Some(Expo { drag: None, since: std::time::Instant::now(), closing: None, windows, hover: None });
         self.request_redraw();
     }
 
@@ -136,13 +161,31 @@ impl Fde {
         self.request_redraw();
     }
 
-    /// The pointer moved: light the window under it. True if the overview took the motion.
+    /// Where the workspace buttons are, in the shared space (on the first monitor).
+    pub fn expo_strip(&self) -> Vec<Rectangle<f64, Logical>> {
+        let r = self.output_rect(&self.output);
+        strip(self.workspace_count(), r.size.w as f64, r.size.h as f64)
+            .into_iter()
+            .map(|(x, y, w, h)| Rectangle::new((x + r.loc.x as f64, y + r.loc.y as f64).into(), (w, h).into()))
+            .collect()
+    }
+
+    /// The pointer moved: light the window under it, or carry the window being dragged. True if
+    /// the overview took the motion.
     pub fn expo_motion(&mut self, p: Point<f64, Logical>) -> bool {
         if self.expo.as_ref().is_none_or(|e| e.closing.is_some()) {
             return self.expo.is_some();
         }
         let hover = self.expo_cells().iter().position(|c| c.contains(p));
         if let Some(e) = self.expo.as_mut() {
+            if let Some(d) = e.drag.as_mut() {
+                d.at = p;
+                if !d.moved && ((p.x - d.start.x).powi(2) + (p.y - d.start.y).powi(2)).sqrt() > 8.0 {
+                    d.moved = true;
+                }
+                self.request_redraw();
+                return true;
+            }
             if e.hover != hover {
                 e.hover = hover;
                 self.request_redraw();
@@ -151,11 +194,90 @@ impl Fde {
         true
     }
 
-    /// A button went down in the overview: a window is chosen, anywhere else leaves.
-    pub fn expo_click(&mut self, p: Point<f64, Logical>) {
+    /// A button went down in the overview: a workspace button goes there, a window may be picked
+    /// up (a click chooses it, a drag onto a workspace button sends it there), anywhere else leaves.
+    pub fn expo_press(&mut self, p: Point<f64, Logical>) {
+        if self.expo.as_ref().is_none_or(|e| e.closing.is_some()) {
+            return;
+        }
+        if let Some(n) = self.expo_strip().iter().position(|b| b.contains(p)) {
+            if n != self.workspace {
+                self.switch_workspace(n);
+            }
+            self.close_expo(None);
+            return;
+        }
         let cells = self.expo_cells();
-        let chosen = cells.iter().position(|c| c.contains(p)).and_then(|i| self.expo.as_ref().and_then(|e| e.windows.get(i).cloned()));
-        self.close_expo(chosen);
+        match cells.iter().position(|c| c.contains(p)) {
+            Some(i) => {
+                if let Some(e) = self.expo.as_mut() {
+                    e.drag = Some(ExpoDrag { index: i, start: p, at: p, moved: false });
+                }
+                self.request_redraw();
+            }
+            None => self.close_expo(None),
+        }
+    }
+
+    /// The button went up: the carried window is dropped on a workspace button (and goes there) or
+    /// was only clicked (and is chosen).
+    pub fn expo_release(&mut self, p: Point<f64, Logical>) {
+        let Some(drag) = self.expo.as_mut().and_then(|e| e.drag.take()) else { return };
+        let window = self.expo.as_ref().and_then(|e| e.windows.get(drag.index).cloned());
+        let Some(window) = window else { return };
+        if !drag.moved {
+            self.close_expo(Some(window));
+            return;
+        }
+        if let Some(n) = self.expo_strip().iter().position(|b| b.contains(p)) {
+            if n != self.window_workspace_of(&window) {
+                self.move_window_to_workspace(&window, n);
+                if let Some(e) = self.expo.as_mut() {
+                    e.windows.retain(|w| *w != window);
+                    if e.windows.is_empty() {
+                        self.expo = None;
+                    }
+                }
+                self.hud = Some((std::time::Instant::now(), format!("Moved to workspace {}", n + 1)));
+            }
+        }
+        self.request_redraw();
+    }
+
+    /// The hot corner: the pointer in the top left corner of the first monitor for a quarter of a
+    /// second opens the overview (once; it takes the pointer leaving the corner to arm it again).
+    pub fn check_hot_corner(&mut self) {
+        if !self.config.shell.hot_corner || self.locked || self.greeter || self.expo.is_some() {
+            self.corner_since = None;
+            return;
+        }
+        let r = self.output_rect(&self.output);
+        let p = self.pointer_location;
+        let in_corner = p.x >= r.loc.x as f64 && p.y >= r.loc.y as f64 && p.x < r.loc.x as f64 + 2.0 && p.y < r.loc.y as f64 + 2.0;
+        if !in_corner {
+            self.corner_since = None;
+            self.corner_armed = true;
+            return;
+        }
+        if !self.corner_armed {
+            return;
+        }
+        match self.corner_since {
+            None => {
+                self.corner_since = Some(std::time::Instant::now());
+                self.request_redraw();
+            }
+            Some(t) if t.elapsed().as_secs_f32() >= 0.25 => {
+                self.corner_since = None;
+                self.corner_armed = false;
+                // not over a full-screen window (a game's menu bar is up there)
+                let out = self.output.clone();
+                if !self.fullscreen_on(&out) {
+                    self.toggle_expo();
+                }
+            }
+            Some(_) => {}
+        }
     }
 
     /// Housekeeping each frame: the overview ends when its way back is done (or the screen locks).
@@ -231,5 +353,27 @@ mod tests {
         assert_eq!(mix(a, b, 0.0), a);
         assert_eq!(mix(a, b, 1.0), b);
         assert_eq!(mix(a, b, 0.5), (100.0, 50.0, 75.0, 75.0));
+    }
+
+    #[test]
+    fn the_workspace_buttons_are_centred_along_the_top_and_fit() {
+        for (w, h) in [(1920.0, 1080.0), (1280.0, 800.0), (320.0, 200.0)] {
+            for count in 1..=9 {
+                let b = strip(count, w, h);
+                assert_eq!(b.len(), count);
+                for (i, c) in b.iter().enumerate() {
+                    assert!(c.0 >= 0.0 && c.0 + c.2 <= w + 1e-6 || w < 400.0, "{count} buttons on {w}: {c:?}");
+                    assert!(c.1 >= 0.0 && c.1 + c.3 < h * 0.15 + 30.0);
+                    assert!(b[i + 1..].iter().all(|d| !overlap(*c, *d)));
+                }
+                let mid = (b[0].0 + b[count - 1].0 + b[count - 1].2) / 2.0;
+                assert!((mid - w / 2.0).abs() < 1.0, "centred");
+            }
+        }
+        assert!(strip(0, 800.0, 600.0).is_empty());
+        // the buttons are above the windows (the layout leaves room for them)
+        let top = layout(&[(400.0, 300.0)], 1280.0, 800.0)[0].1;
+        let bottom_of_strip = strip(4, 1280.0, 800.0)[0].1 + strip(4, 1280.0, 800.0)[0].3;
+        assert!(top >= bottom_of_strip, "the windows start below the buttons");
     }
 }

@@ -4,9 +4,9 @@
 //! the title in its colour, the buttons from its bitmaps). The rest of the desktop (task bar, menus)
 //! takes its accent colour from the theme's title bar.
 //!
-//! Not supported: the bottom handle with its grips (its height is not added to the frame), the
-//! window icon and the shade, desktop and sticky buttons, menu and on-screen-display colours,
-//! pressed and hover looks of the buttons, and fonts (FDE's own font is used).
+//! Not supported: the window icon and the shade, desktop and sticky buttons, on-screen-display
+//! colours, the menu's gradients and fonts (FDE's own font is used). The bottom handle with its
+//! grips, the hover and pressed looks of the buttons and the menu's flat colours are.
 
 use std::path::{Path, PathBuf};
 
@@ -78,6 +78,24 @@ pub struct Look {
     pub client_color: Rgb,
     pub button_bg: Texture,
     pub button_image: Rgb,
+    pub button_bg_hover: Texture,
+    pub button_image_hover: Rgb,
+    pub button_bg_pressed: Texture,
+    pub button_image_pressed: Rgb,
+    /// the bottom handle and the grips at its two ends
+    pub handle: Texture,
+    pub grip: Texture,
+}
+
+/// The colours of the menus (the window menu is drawn with them).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MenuLook {
+    pub bg: Rgb,
+    pub text: Rgb,
+    pub active_bg: Rgb,
+    pub active_text: Rgb,
+    pub border: Rgb,
+    pub border_width: u32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -89,6 +107,9 @@ pub struct ObTheme {
     pub padding_w: u32,
     pub padding_h: u32,
     pub justify: Justify,
+    /// height of the handle at the bottom of a window (0: none), at scale 1
+    pub handle_width: u32,
+    pub menu: MenuLook,
     pub active: Look,
     pub inactive: Look,
 }
@@ -107,6 +128,11 @@ impl ObTheme {
     /// Height of the title bar at scale 1.
     pub fn title_height(&self) -> u32 {
         LABEL_HEIGHT + 2 * self.padding_h
+    }
+
+    /// Width of a grip at the end of the handle, at scale 1.
+    pub fn grip_width(&self) -> u32 {
+        25
     }
 
     /// Thickness of the frame at the sides and bottom (and above the title) at scale 1.
@@ -266,6 +292,16 @@ impl ObTheme {
             _ => Justify::Left,
         };
         let global_border = p.color(&["border.color"]).unwrap_or([0, 0, 0]);
+        let handle_width = p.number(&["window.handle.width"]).unwrap_or(6).min(24);
+        let menu_bg = p.texture("menu.items.bg", &Texture::solid([0xee, 0xee, 0xee]));
+        let menu = MenuLook {
+            bg: menu_bg.color,
+            text: p.color(&["menu.items.text.color"]).unwrap_or([0, 0, 0]),
+            active_bg: p.texture("menu.items.active.bg", &Texture::solid([0x44, 0x66, 0xaa])).color,
+            active_text: p.color(&["menu.items.active.text.color"]).unwrap_or([255, 255, 255]),
+            border: p.color(&["menu.border.color", "border.color"]).unwrap_or([0, 0, 0]),
+            border_width: p.number(&["menu.border.width", "border.width"]).unwrap_or(1).min(8),
+        };
         let look = |which: &str, default_text: Rgb| -> Look {
             let base = Texture::solid([0x80, 0x80, 0x80]);
             let title = p.texture(&format!("window.{which}.title.bg"), &base);
@@ -280,10 +316,25 @@ impl ObTheme {
                 p.texture(&format!("window.{which}.button.unpressed.bg"), &parent)
             };
             let label_text = p.color(&[&format!("window.{which}.label.text.color")]).unwrap_or(default_text);
+            let state_bg = |state: &str| {
+                let mut parent = button_bg.clone();
+                parent.parent_relative = button_bg.parent_relative;
+                p.texture(&format!("window.{which}.button.{state}.bg"), &parent)
+            };
+            let image = |state: &str, fallback: Rgb| p.color(&[&format!("window.{which}.button.{state}.image.color")]).unwrap_or(fallback);
+            let unpressed_image = image("unpressed", label_text);
+            let handle = p.texture(&format!("window.{which}.handle.bg"), &Texture::solid(title.color));
+            let grip = p.texture(&format!("window.{which}.grip.bg"), &handle);
             Look {
+                button_bg_hover: state_bg("hover"),
+                button_image_hover: image("hover", unpressed_image),
+                button_bg_pressed: state_bg("pressed"),
+                button_image_pressed: image("pressed", unpressed_image),
+                handle,
+                grip,
                 client_color: p.color(&[&format!("window.{which}.client.color"), &format!("window.{which}.frame.color")]).unwrap_or(title.color),
                 border_color: p.color(&[&format!("window.{which}.border.color")]).unwrap_or(global_border),
-                button_image: p.color(&[&format!("window.{which}.button.unpressed.image.color")]).unwrap_or(label_text),
+                button_image: unpressed_image,
                 title,
                 label,
                 label_text,
@@ -298,6 +349,8 @@ impl ObTheme {
             padding_w,
             padding_h,
             justify,
+            handle_width,
+            menu,
             active: look("active", [255, 255, 255]),
             inactive: look("inactive", [200, 200, 200]),
         }
@@ -420,6 +473,15 @@ pub fn parse_xbm(text: &str) -> Option<Bitmap> {
     Some(Bitmap { width, height, bits })
 }
 
+/// How a button looks: at rest, with the pointer on it, or held down.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ButtonState {
+    #[default]
+    Normal,
+    Hover,
+    Pressed,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Glyph {
     Close,
@@ -452,8 +514,20 @@ fn builtin_glyph(g: Glyph) -> Bitmap {
 
 /// The bitmap of a button: the theme's own, or a plain one.
 pub fn glyph_bitmap(theme: &ObTheme, g: Glyph) -> Bitmap {
-    let path = theme.dir.join("openbox-3").join(g.file());
-    std::fs::read_to_string(path).ok().and_then(|t| parse_xbm(&t)).unwrap_or_else(|| builtin_glyph(g))
+    glyph_bitmap_for(theme, g, ButtonState::Normal)
+}
+
+/// The same for a hover or pressed button: `close_hover.xbm`, `close_pressed.xbm`, else the plain one.
+pub fn glyph_bitmap_for(theme: &ObTheme, g: Glyph, state: ButtonState) -> Bitmap {
+    let dir = theme.dir.join("openbox-3");
+    let read = |file: String| std::fs::read_to_string(dir.join(file)).ok().and_then(|t| parse_xbm(&t));
+    let stem = g.file().trim_end_matches(".xbm");
+    let special = match state {
+        ButtonState::Normal => None,
+        ButtonState::Hover => read(format!("{stem}_hover.xbm")),
+        ButtonState::Pressed => read(format!("{stem}_pressed.xbm")),
+    };
+    special.or_else(|| read(g.file().to_string())).unwrap_or_else(|| builtin_glyph(g))
 }
 
 // ---------------------------------------------------------------- drawing
@@ -590,6 +664,7 @@ pub fn fill(cv: &mut Canvas, x: usize, y: usize, w: usize, h: usize, t: &Texture
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ButtonSpot {
     pub glyph: Glyph,
+    pub state: ButtonState,
     pub x: i32,
     pub y: i32,
     pub w: i32,
@@ -625,6 +700,7 @@ pub fn render_frame(theme: &ObTheme, spec: &FrameSpec) -> Canvas {
     let mut cv = Canvas::new(w, h);
     let (bw, frame) = (px(theme.border_width), px(theme.frame_width()));
     let title_h = px(theme.title_height());
+    let handle_h = px(theme.handle_width);
     // the border, then the client colour inside it
     fill(&mut cv, 0, 0, w, h, &Texture::solid(look.border_color));
     if w > 2 * bw && h > 2 * bw {
@@ -657,10 +733,17 @@ pub fn render_frame(theme: &ObTheme, spec: &FrameSpec) -> Canvas {
         if b.w <= 0 || b.h <= 0 {
             continue;
         }
-        if !look.button_bg.parent_relative {
-            fill(&mut cv, b.x.max(0) as usize, b.y.max(0) as usize, b.w as usize, b.h as usize, &look.button_bg);
+        let (bg, ink) = match b.state {
+            ButtonState::Normal => (&look.button_bg, look.button_image),
+            ButtonState::Hover => (&look.button_bg_hover, look.button_image_hover),
+            ButtonState::Pressed => (&look.button_bg_pressed, look.button_image_pressed),
+        };
+        // a button that has a look of its own for this state (even one of a theme whose buttons
+        // are otherwise parent relative) is filled
+        if !bg.parent_relative {
+            fill(&mut cv, b.x.max(0) as usize, b.y.max(0) as usize, b.w as usize, b.h as usize, bg);
         }
-        let bm = glyph_bitmap(theme, b.glyph);
+        let bm = glyph_bitmap_for(theme, b.glyph, b.state);
         let k = ((s.round() as i32).max(1)).min(((b.w / bm.width as i32).max(1)).min((b.h / bm.height as i32).max(1)));
         let (gw, gh) = (bm.width as i32 * k, bm.height as i32 * k);
         let (gx, gy) = (b.x + (b.w - gw) / 2, b.y + (b.h - gh) / 2);
@@ -671,7 +754,7 @@ pub fn render_frame(theme: &ObTheme, spec: &FrameSpec) -> Canvas {
                         for dx in 0..k {
                             let (x, y) = (gx + xx as i32 * k + dx, gy + yy as i32 * k + dy);
                             if x >= 0 && y >= 0 {
-                                cv.set(x as usize, y as usize, look.button_image);
+                                cv.set(x as usize, y as usize, ink);
                             }
                         }
                     }
@@ -679,9 +762,17 @@ pub fn render_frame(theme: &ObTheme, spec: &FrameSpec) -> Canvas {
             }
         }
     }
+    // the handle at the bottom with a grip at each end (below the client padding, above the border)
+    if handle_h > 0 && w > 2 * bw && h > bw + handle_h + frame + title_h {
+        let hy = h - bw - handle_h;
+        fill(&mut cv, bw, hy, w - 2 * bw, handle_h, &look.handle);
+        let gw = px(theme.grip_width()).min((w - 2 * bw) / 2);
+        fill(&mut cv, bw, hy, gw, handle_h, &look.grip);
+        fill(&mut cv, w - bw - gw, hy, gw, handle_h, &look.grip);
+    }
     // the client's place is empty (the program draws there)
-    if w > 2 * frame && h > 2 * frame + title_h {
-        cv.clear_rect(frame, frame + title_h, w - 2 * frame, h - 2 * frame - title_h);
+    if w > 2 * frame && h > 2 * frame + title_h + handle_h {
+        cv.clear_rect(frame, frame + title_h, w - 2 * frame, h - 2 * frame - title_h - handle_h);
     }
     cv
 }
@@ -822,7 +913,7 @@ window.active.button.unpressed.image.color: #ffeedd
         let (w, h) = (300usize, 200usize);
         let title_h = t.title_height() as usize;
         let frame = t.frame_width() as usize;
-        let buttons = [ButtonSpot { glyph: Glyph::Close, x: 270, y: (frame + 2) as i32, w: 14, h: 14 }];
+        let buttons = [ButtonSpot { glyph: Glyph::Close, state: ButtonState::Normal, x: 270, y: (frame + 2) as i32, w: 14, h: 14 }];
         let cv = render_frame(&t, &FrameSpec { w, h, scale: 1.0, focused: true, label: None, buttons: &buttons });
         // the outer pixel is the border colour
         assert_eq!(cv.pixel(0, 0)[..3], [0x11, 0x22, 0x33]);
@@ -919,9 +1010,9 @@ window.active.button.unpressed.image.color: #ffeedd
                 for focused in [true, false] {
                     let (w, h) = ((400.0 * scale) as usize, (300.0 * scale) as usize);
                     let buttons = [
-                        ButtonSpot { glyph: Glyph::Iconify, x: w as i32 - 70, y: 4, w: 14, h: 14 },
-                        ButtonSpot { glyph: Glyph::Maximize, x: w as i32 - 50, y: 4, w: 14, h: 14 },
-                        ButtonSpot { glyph: Glyph::Close, x: w as i32 - 30, y: 4, w: 14, h: 14 },
+                        ButtonSpot { glyph: Glyph::Iconify, state: ButtonState::Normal, x: w as i32 - 70, y: 4, w: 14, h: 14 },
+                        ButtonSpot { glyph: Glyph::Maximize, state: ButtonState::Normal, x: w as i32 - 50, y: 4, w: 14, h: 14 },
+                        ButtonSpot { glyph: Glyph::Close, state: ButtonState::Normal, x: w as i32 - 30, y: 4, w: 14, h: 14 },
                     ];
                     let cv = render_frame(&t, &FrameSpec { w, h, scale, focused, label: None, buttons: &buttons });
                     assert_eq!(cv.px.len(), w * h * 4, "{name}");
@@ -957,7 +1048,7 @@ window.active.button.unpressed.image.color: #ffeedd
             let t = ObTheme::parse(&text, "Fuzz", Path::new("/nonexistent"));
             assert!(t.frame_width() <= 48 && t.title_height() <= 100, "round {round}: sizes stay sane");
             for (w, h, scale, focused) in [(1usize, 1usize, 1.0f32, true), (3, 2, 1.0, false), (40, 20, 2.0, true), (7, 400, 1.5, false), (400, 7, 1.0, true), (0, 0, 1.0, true), (300, 200, 8.0, true), (64, 64, 0.1, false)] {
-                let buttons = [ButtonSpot { glyph: Glyph::Close, x: -10, y: -10, w: 30, h: 30 }, ButtonSpot { glyph: Glyph::Maximize, x: w as i32 + 5, y: 1, w: 0, h: 14 }];
+                let buttons = [ButtonSpot { glyph: Glyph::Close, state: ButtonState::Normal, x: -10, y: -10, w: 30, h: 30 }, ButtonSpot { glyph: Glyph::Maximize, state: ButtonState::Normal, x: w as i32 + 5, y: 1, w: 0, h: 14 }];
                 let label = vec![255u8; 30 * 12 * 4];
                 let cv = render_frame(&t, &FrameSpec { w, h, scale, focused, label: Some(Label { rgba: &label, w: 30, h: 12 }), buttons: &buttons });
                 assert_eq!(cv.px.len(), w * h * 4);
@@ -967,5 +1058,61 @@ window.active.button.unpressed.image.color: #ffeedd
         for text in ["", "#define a_width 99999\n#define a_height 99999\nstatic char a[] = { 0x00 };", "#define a_width 0\n#define a_height 0\n{ }", "{{{{", "#define a_width 8\n#define a_height 8\nstatic char a[] = { 0xZZ, 0x1 };"] {
             let _ = parse_xbm(text);
         }
+    }
+
+    #[test]
+    fn the_handle_has_grips_and_the_menu_colours_are_read() {
+        let t = ObTheme::parse(
+            "window.handle.width: 8\nwindow.active.handle.bg: Flat Solid\nwindow.active.handle.bg.color: #223344\n\
+             window.active.grip.bg: Flat Solid\nwindow.active.grip.bg.color: #aa5500\nborder.width: 1\n\
+             menu.items.bg: Flat Solid\nmenu.items.bg.color: #101010\nmenu.items.text.color: #eeeeee\n\
+             menu.items.active.bg: Flat Solid\nmenu.items.active.bg.color: #3355ff\nmenu.items.active.text.color: #ffff00\n\
+             menu.border.color: #777777\nmenu.border.width: 2\n",
+            "H",
+            Path::new("/x"),
+        );
+        assert_eq!(t.handle_width, 8);
+        assert_eq!((t.menu.bg, t.menu.text, t.menu.active_bg, t.menu.active_text, t.menu.border, t.menu.border_width), ([16, 16, 16], [238, 238, 238], [0x33, 0x55, 0xff], [255, 255, 0], [0x77, 0x77, 0x77], 2));
+        let (w, h) = (300usize, 200usize);
+        let cv = render_frame(&t, &FrameSpec { w, h, scale: 1.0, focused: true, label: None, buttons: &[] });
+        let bw = 1;
+        // the handle is just above the bottom border: the middle is its colour, the ends the grip's
+        assert_eq!(cv.pixel(150, h - bw - 4)[..3], [0x22, 0x33, 0x44]);
+        assert_eq!(cv.pixel(8, h - bw - 4)[..3], [0xaa, 0x55, 0x00]);
+        assert_eq!(cv.pixel(w - 9, h - bw - 4)[..3], [0xaa, 0x55, 0x00]);
+        // and the client's hole ends above it
+        assert_eq!(cv.pixel(150, h - bw - 8 - 1)[3], 255, "the client padding above the handle is drawn");
+        assert_eq!(cv.pixel(150, 100), [0, 0, 0, 0]);
+        // no handle: none drawn
+        let none = ObTheme::parse("window.handle.width: 0\n", "N", Path::new("/x"));
+        assert_eq!(none.handle_width, 0);
+    }
+
+    #[test]
+    fn hover_and_pressed_buttons_have_their_own_colours_and_bitmaps() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("openbox-3")).unwrap();
+        let solid = "#define c_width 8\n#define c_height 8\nstatic char c_bits[] = { 0xff,0xff,0xff,0xff,0xff,0xff,0xff,0xff };";
+        let one = "#define c_width 8\n#define c_height 8\nstatic char c_bits[] = { 0x01,0x00,0x00,0x00,0x00,0x00,0x00,0x00 };";
+        std::fs::write(dir.path().join("openbox-3/close.xbm"), solid).unwrap();
+        std::fs::write(dir.path().join("openbox-3/close_hover.xbm"), one).unwrap();
+        let t = ObTheme::parse(
+            "window.active.button.unpressed.image.color: #111111\nwindow.active.button.hover.image.color: #222222\n\
+             window.active.button.pressed.image.color: #333333\nwindow.active.button.hover.bg: Flat Solid\n\
+             window.active.button.hover.bg.color: #00ff00\n",
+            "B",
+            dir.path(),
+        );
+        assert_eq!((t.active.button_image, t.active.button_image_hover, t.active.button_image_pressed), ([0x11; 3], [0x22; 3], [0x33; 3]));
+        assert!(t.active.button_bg.parent_relative && !t.active.button_bg_hover.parent_relative, "only the hover look has a fill of its own");
+        assert_eq!(glyph_bitmap_for(&t, Glyph::Close, ButtonState::Normal).bits.iter().filter(|b| **b).count(), 64);
+        assert_eq!(glyph_bitmap_for(&t, Glyph::Close, ButtonState::Hover).bits.iter().filter(|b| **b).count(), 1, "close_hover.xbm");
+        assert_eq!(glyph_bitmap_for(&t, Glyph::Close, ButtonState::Pressed).bits.iter().filter(|b| **b).count(), 64, "no pressed file: the plain one");
+        // drawn: the hover button has the green fill
+        let draw = |state| render_frame(&t, &FrameSpec { w: 200, h: 100, scale: 1.0, focused: true, label: None, buttons: &[ButtonSpot { glyph: Glyph::Close, state, x: 150, y: 6, w: 14, h: 14 }] });
+        let normal = draw(ButtonState::Normal);
+        let hover = draw(ButtonState::Hover);
+        assert_ne!(normal.pixel(151, 7), hover.pixel(151, 7));
+        assert_eq!(hover.pixel(151, 7)[..3], [0, 255, 0]);
     }
 }

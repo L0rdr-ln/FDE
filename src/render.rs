@@ -60,6 +60,8 @@ impl Fde {
         outer: Rectangle<i32, Physical>,
         focused: bool,
         scale: f64,
+        hover: Option<crate::layout::Button>,
+        pressed: bool,
     ) -> Result<Option<GlesTexture>, GlesError> {
         let Some(surface) = window.wl_surface().map(|s| s.into_owned()) else { return Ok(None) };
         let title = self.window_title(window);
@@ -70,7 +72,13 @@ impl Fde {
         if w.saturating_mul(h) > 40_000_000 || w > 16_384 || h > 16_384 {
             return Ok(None);
         }
-        let key = (w, h, focused, maximized, title.clone(), std::sync::Arc::as_ptr(theme) as usize);
+        let hover_code = match hover {
+            None => 0usize,
+            Some(crate::layout::Button::Minimize) => 1,
+            Some(crate::layout::Button::Maximize) => 2,
+            Some(crate::layout::Button::Close) => 3,
+        } + if pressed && hover.is_some() { 4 } else { 0 };
+        let key = (w, h, focused, maximized, title.clone(), std::sync::Arc::as_ptr(theme) as usize ^ (hover_code << 60));
         let cache_key = (surface.id(), (scale * 1000.0) as i32);
         if let Some(f) = self.ob_frames.get(&cache_key) {
             if f.key == key {
@@ -83,7 +91,12 @@ impl Fde {
         let local = Rectangle::<i32, smithay::utils::Logical>::new((0, 0).into(), (w as i32, h as i32).into());
         let spot = |b: Button, glyph: Glyph| -> ButtonSpot {
             let (c, hw, hh) = button_geom(local, style, b);
-            ButtonSpot { glyph, x: (c.x - hw).round() as i32, y: (c.y - hh).round() as i32, w: (hw * 2.0).round() as i32, h: (hh * 2.0).round() as i32 }
+            let state = match hover {
+                Some(h) if h == b && pressed => crate::obtheme::ButtonState::Pressed,
+                Some(h) if h == b => crate::obtheme::ButtonState::Hover,
+                _ => crate::obtheme::ButtonState::Normal,
+            };
+            ButtonSpot { glyph, state, x: (c.x - hw).round() as i32, y: (c.y - hh).round() as i32, w: (hw * 2.0).round() as i32, h: (hh * 2.0).round() as i32 }
         };
         let buttons = [
             spot(Button::Minimize, Glyph::Iconify),
@@ -568,7 +581,15 @@ impl Fde {
                 // the title (re-rendered only when it, its room or the focus change)
                 let title_draw = if framed && ob_theme.is_none() { self.title_texture(renderer, window, &style, outer_d, focused, view.scale)? } else { None };
                 let ob_frame = match &ob_theme {
-                    Some(t) => self.ob_frame_texture(renderer, window, t, &style, outer_d, focused, view.scale)?,
+                    Some(t) => {
+                        // the button the pointer is on (and whether the left button is down)
+                        let hovered = self.space.element_geometry(window).and_then(|g| match crate::layout::hit(g, &self.frame_style(window), self.pointer_location) {
+                            Some(crate::layout::Hit::Button(b)) => Some(b),
+                            _ => None,
+                        });
+                        let down = self.button_down;
+                        self.ob_frame_texture(renderer, window, t, &style, outer_d, focused, view.scale, hovered, down)?
+                    }
                     None => None,
                 };
 
@@ -818,11 +839,19 @@ impl Fde {
         use crate::winmenu::{PAD, ROW_H};
         let Some(menu) = self.window_menu.clone() else { return Ok(()) };
         let sheet = view.rect(menu.rect());
+        // in an Openbox theme the menu is flat, in the theme's own colours
+        let ob = self.ob_theme.as_ref().map(|t| t.menu.clone());
         let mut lines: Vec<(GlesTexture, Rectangle<i32, Physical>)> = Vec::new();
         for (i, item) in menu.items.iter().enumerate() {
             let row = view.rect(Rectangle::new((menu.at.x + PAD, menu.at.y + PAD + i as i32 * ROW_H).into(), (crate::winmenu::WIDTH - 2 * PAD, ROW_H).into()));
-            let color = if matches!(item, crate::winmenu::MenuItem::Close) { [150, 25, 15] } else { crate::theme::palette().ink };
-            if let Some(img) = self.text.line(&item.label(), row.size.w - sc(16, view.scale), 13.0 * view.scale as f32, color, Some(([255, 255, 255], 0.8)), sc(2, view.scale)) {
+            let color = match &ob {
+                Some(m) if menu.hover == Some(i) => m.active_text,
+                Some(m) => m.text,
+                None if matches!(item, crate::winmenu::MenuItem::Close) => [150, 25, 15],
+                None => crate::theme::palette().ink,
+            };
+            let glow = if ob.is_some() { None } else { Some(([255, 255, 255], 0.8)) };
+            if let Some(img) = self.text.line(&item.label(), row.size.w - sc(16, view.scale), 13.0 * view.scale as f32, color, glow, sc(2, view.scale)) {
                 let tex = renderer.import_memory(&img.rgba, Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((img.width, img.height)), false)?;
                 let dest = Rectangle::new((row.loc.x + sc(10, view.scale), row.loc.y + (row.size.h - img.height) / 2).into(), (img.width, img.height).into());
                 lines.push((tex, dest));
@@ -832,15 +861,28 @@ impl Fde {
         let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
         let full = Rectangle::<i32, Physical>::from_size(size);
         // a soft shadow, the sheet, a light top edge
-        let shadow = Rectangle::<i32, Physical>::new((sheet.loc.x + sc(3, view.scale), sheet.loc.y + sc(4, view.scale)).into(), sheet.size);
-        frame.draw_solid(full, &[shadow], Color32F::new(0.0, 0.0, 0.0, 0.25))?;
-        // the light glass of the task bar and the windows (premultiplied)
-        frame.draw_solid(full, &[sheet], Color32F::new(0.70, 0.82, 0.92, 0.94))?;
-        let edge = Rectangle::<i32, Physical>::new(sheet.loc, (sheet.size.w, sc(1, view.scale).max(1)).into());
-        frame.draw_solid(full, &[edge], Color32F::new(0.95, 0.98, 1.0, 0.95))?;
-        if let Some(h) = menu.hover {
-            let lit = view.rect(Rectangle::new((menu.at.x + PAD / 2, menu.at.y + PAD + h as i32 * ROW_H).into(), (crate::winmenu::WIDTH - PAD, ROW_H).into()));
-            frame.draw_solid(full, &[lit], Color32F::new(0.22, 0.34, 0.50, 0.52))?; // premultiplied: a blue at half strength
+        let rgb = |c: [u8; 3]| Color32F::new(c[0] as f32 / 255.0, c[1] as f32 / 255.0, c[2] as f32 / 255.0, 1.0);
+        if let Some(m) = &ob {
+            let bw = sc(m.border_width as i32, view.scale).max(if m.border_width > 0 { 1 } else { 0 });
+            frame.draw_solid(full, &[sheet], rgb(m.border))?;
+            let inner = Rectangle::<i32, Physical>::new((sheet.loc.x + bw, sheet.loc.y + bw).into(), ((sheet.size.w - 2 * bw).max(1), (sheet.size.h - 2 * bw).max(1)).into());
+            frame.draw_solid(full, &[inner], rgb(m.bg))?;
+            if let Some(h) = menu.hover {
+                let lit = view.rect(Rectangle::new((menu.at.x + PAD / 2, menu.at.y + PAD + h as i32 * ROW_H).into(), (crate::winmenu::WIDTH - PAD, ROW_H).into()));
+                frame.draw_solid(full, &[lit], rgb(m.active_bg))?;
+            }
+        } else {
+            // a soft shadow, the sheet, a light top edge
+            let shadow = Rectangle::<i32, Physical>::new((sheet.loc.x + sc(3, view.scale), sheet.loc.y + sc(4, view.scale)).into(), sheet.size);
+            frame.draw_solid(full, &[shadow], Color32F::new(0.0, 0.0, 0.0, 0.25))?;
+            // the light glass of the task bar and the windows (premultiplied)
+            frame.draw_solid(full, &[sheet], Color32F::new(0.70, 0.82, 0.92, 0.94))?;
+            let edge = Rectangle::<i32, Physical>::new(sheet.loc, (sheet.size.w, sc(1, view.scale).max(1)).into());
+            frame.draw_solid(full, &[edge], Color32F::new(0.95, 0.98, 1.0, 0.95))?;
+            if let Some(h) = menu.hover {
+                let lit = view.rect(Rectangle::new((menu.at.x + PAD / 2, menu.at.y + PAD + h as i32 * ROW_H).into(), (crate::winmenu::WIDTH - PAD, ROW_H).into()));
+                frame.draw_solid(full, &[lit], Color32F::new(0.22, 0.34, 0.50, 0.52))?; // premultiplied: a blue at half strength
+            }
         }
         for (tex, dest) in &lines {
             let src = Rectangle::<f64, BufferCoord>::from_size((tex.size().w as f64, tex.size().h as f64).into());
@@ -1071,8 +1113,8 @@ impl Fde {
         view: View,
     ) -> Result<(), GlesError> {
         let full = Rectangle::<i32, Physical>::from_size(size);
-        let (windows, hover, p) = match &self.expo {
-            Some(e) => (e.windows.clone(), e.hover, e.progress()),
+        let (windows, hover, p, drag) = match &self.expo {
+            Some(e) => (e.windows.clone(), e.hover, e.progress(), e.drag.clone().filter(|d| d.moved)),
             None => return Ok(()),
         };
         let cells = self.expo_cells();
@@ -1081,6 +1123,18 @@ impl Fde {
         };
         let mut pictures = Vec::new();
         let mut titles = Vec::new();
+        let mut carried_pic: Option<(GlesTexture, crate::expo::Cell)> = None;
+        // the workspace buttons along the top
+        let strip: Vec<crate::expo::Cell> = self.expo_strip().into_iter().map(to_phys).collect();
+        let mut strip_labels = Vec::new();
+        for (n, b) in strip.iter().enumerate() {
+            if let Some(img) = self.text.line(&format!("{}", n + 1), 60, 18.0 * view.scale as f32, [255, 255, 255], Some(([8, 40, 90], 0.95)), (3.0 * view.scale) as i32) {
+                let tex = renderer.import_memory(&img.rgba, Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((img.width, img.height)), false)?;
+                strip_labels.push((tex, (b.0 + (b.2 - img.width as f64) / 2.0, b.1 + (b.3 - img.height as f64) / 2.0), img.width, img.height));
+            }
+        }
+        let pointer_phys = ((self.pointer_location.x - view.origin.x as f64) * view.scale, (self.pointer_location.y - view.origin.y as f64) * view.scale);
+        let current_ws = self.workspace;
         for (i, w) in windows.iter().enumerate() {
             let Some(cell) = cells.get(i).copied() else { continue };
             let target = to_phys(cell);
@@ -1091,8 +1145,22 @@ impl Fde {
             };
             let at = crate::expo::mix(start, target, p);
             let (tex, _, _) = self.window_picture(renderer, w, view.scale)?;
-            let alpha = if mapped { 1.0 } else { p as f32 };
-            pictures.push((tex, at, alpha, hover == Some(i), target));
+            let mut alpha = if mapped { 1.0 } else { p as f32 };
+            let carried = drag.as_ref().is_some_and(|d| d.index == i);
+            if carried {
+                alpha = 0.3; // its place is empty while it is carried
+            }
+            pictures.push((tex, at, alpha, hover == Some(i) && !carried, target));
+            if carried {
+                // the picture itself, smaller, under the pointer
+                if let Some(d) = &drag {
+                    let (tex2, _, _) = self.window_picture(renderer, w, view.scale)?;
+                    let k = 0.55;
+                    let (cw, ch) = (target.2 * k, target.3 * k);
+                    let (px, py) = ((d.at.x - view.origin.x as f64) * view.scale, (d.at.y - view.origin.y as f64) * view.scale);
+                    carried_pic = Some((tex2, (px - cw / 2.0, py - ch / 2.0, cw, ch)));
+                }
+            }
             let title = self.window_title(w);
             if let Some(img) = self.text.line(&title, (target.2 as i32).max(120), 15.0 * view.scale as f32, [255, 255, 255], Some(([8, 40, 90], 0.95)), (3.0 * view.scale) as i32) {
                 let tex = renderer.import_memory(&img.rgba, Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((img.width, img.height)), false)?;
@@ -1119,6 +1187,32 @@ impl Fde {
             frame.render_texture_from_to(tex, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, *alpha, None, &[])?;
         }
         for (tex, (x, y), tw, th) in &titles {
+            let dest = Rectangle::<i32, Physical>::new((x.round() as i32, y.round() as i32).into(), (*tw, *th).into());
+            let src = Rectangle::<f64, BufferCoord>::from_size((*tw as f64, *th as f64).into());
+            frame.render_texture_from_to(tex, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, p as f32, None, &[])?;
+        }
+        if let Some((tex, at)) = &carried_pic {
+            let dest = Rectangle::<i32, Physical>::new((at.0.round() as i32, at.1.round() as i32).into(), (at.2.round().max(1.0) as i32, at.3.round().max(1.0) as i32).into());
+            let src = Rectangle::<f64, BufferCoord>::from_size((tex.size().w as f64, tex.size().h as f64).into());
+            frame.render_texture_from_to(tex, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, 0.9, None, &[])?;
+        }
+        // the workspace buttons: the one being shown lit, the one under the pointer brighter (a
+        // drop target while a window is carried)
+        for (n, b) in strip.iter().enumerate() {
+            let r = Rectangle::<i32, Physical>::new((b.0.round() as i32, b.1.round() as i32).into(), (b.2.round() as i32, b.3.round() as i32).into());
+            let over = pointer_phys.0 >= b.0 && pointer_phys.0 < b.0 + b.2 && pointer_phys.1 >= b.1 && pointer_phys.1 < b.1 + b.3;
+            let color = if over && drag.is_some() {
+                Color32F::new(0.30, 0.62, 0.32, 0.92 * p as f32)
+            } else if over {
+                Color32F::new(0.30, 0.52, 0.80, 0.85 * p as f32)
+            } else if n == current_ws {
+                Color32F::new(0.20, 0.42, 0.70, 0.80 * p as f32)
+            } else {
+                Color32F::new(0.03, 0.10, 0.22, 0.60 * p as f32)
+            };
+            frame.draw_solid(r, &[Rectangle::from_size(r.size)], color)?;
+        }
+        for (tex, (x, y), tw, th) in &strip_labels {
             let dest = Rectangle::<i32, Physical>::new((x.round() as i32, y.round() as i32).into(), (*tw, *th).into());
             let src = Rectangle::<f64, BufferCoord>::from_size((*tw as f64, *th as f64).into());
             frame.render_texture_from_to(tex, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, p as f32, None, &[])?;

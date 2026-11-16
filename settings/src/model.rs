@@ -91,6 +91,11 @@ pub fn tiling(on: bool) -> Vec<(&'static str, Setting)> {
     vec![("shell.tiling_default", Setting::Bool(on))]
 }
 
+/// The pointer in the top left corner opens the overview.
+pub fn hot_corner(on: bool) -> Vec<(&'static str, Setting)> {
+    vec![("shell.hot_corner", Setting::Bool(on))]
+}
+
 pub fn wallpaper(path: &str, mode: &str) -> Vec<(&'static str, Setting)> {
     vec![("wallpaper.path", Setting::Str(path.trim().to_string())), ("wallpaper.mode", Setting::Str(mode.to_string()))]
 }

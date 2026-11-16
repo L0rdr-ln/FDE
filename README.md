@@ -76,7 +76,7 @@ issue. See [docs/HARDWARE.md](docs/HARDWARE.md).
 | **Windows key** | Start menu |
 | **Alt+Return** | Terminal |
 | **Alt+Tab** | Switch windows |
-| **Super+Tab** | Overview of all windows |
+| **Super+Tab** | Overview of all windows: click one to go there, drag one onto a workspace button to send it there (`shell.hot_corner`: the top left corner opens it) |
 | **Alt+drag** | Move a window |
 | **Alt+Left / Right** | Snap to half the screen |
 | **Alt+T** | Tiling mode for this workspace (windows stay laid out; again: leave it) |

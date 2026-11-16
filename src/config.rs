@@ -164,11 +164,13 @@ pub struct Shell {
     pub pinned: Vec<String>,
     /// every workspace starts in tiling mode (Alt+T still switches one off)
     pub tiling_default: bool,
+    /// the pointer in the top left corner of the first monitor for a moment opens the overview
+    pub hot_corner: bool,
 }
 
 impl Default for Shell {
     fn default() -> Self {
-        Shell { terminal: "foot".into(), launcher: String::new(), panel: true, autostart: Vec::new(), polkit_agent: true, remember_windows: true, pinned: Vec::new(), tiling_default: false }
+        Shell { terminal: "foot".into(), launcher: String::new(), panel: true, autostart: Vec::new(), polkit_agent: true, remember_windows: true, pinned: Vec::new(), tiling_default: false, hot_corner: false }
     }
 }
 
@@ -398,6 +400,7 @@ impl Config {
         style.radius = t.radius;
         style.border = t.border;
         style.titlebar = t.titlebar;
+        style.handle = t.handle;
         style.tint_frame = [r, g, b, transparency];
         style.tint_client = t.client_tint;
         style.gloss = gloss;

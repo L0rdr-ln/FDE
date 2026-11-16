@@ -62,6 +62,8 @@ pub struct Theme {
     pub radius_bottom: f32,
     pub border: f32,
     pub titlebar: f32,
+    /// extra frame height at the bottom (the handle of an Openbox theme)
+    pub handle: f32,
     pub client_tint: [f32; 4],
     pub highlight: f32,
     pub reflections: f32,
@@ -94,6 +96,7 @@ impl Default for Theme {
             radius_bottom: -1.0,
             border: 8.0,
             titlebar: 32.0,
+            handle: 0.0,
             client_tint: [0.85, 0.93, 1.0, 0.10],
             highlight: 0.9,
             reflections: 1.0,
@@ -182,6 +185,7 @@ impl Theme {
         t.radius_bottom = 0.0;
         t.border = ob.frame_width() as f32;
         t.titlebar = ob.title_height() as f32;
+        t.handle = ob.handle_width as f32;
         t.highlight = 0.0;
         t.reflections = 0.0;
         t.glow = 0.0;

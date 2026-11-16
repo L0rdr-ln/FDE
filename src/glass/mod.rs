@@ -52,6 +52,8 @@ pub struct GlassStyle {
     pub blur_levels: usize,
     /// 1 = the frame is an Openbox theme drawn in software (the glass is not used for frames)
     pub openbox: f32,
+    /// extra height at the bottom of the frame (the handle of an Openbox theme)
+    pub handle: f32,
 }
 
 impl GlassStyle {
@@ -66,6 +68,7 @@ impl GlassStyle {
             orb_size: self.orb_size * s,
             orb_gap: self.orb_gap * s,
             orb_margin: self.orb_margin * s,
+            handle: self.handle * s,
             ..*self
         }
     }
@@ -101,6 +104,7 @@ impl Default for GlassStyle {
             title_glow: 0.95,
             blur_levels: 3,
             openbox: 0.0,
+            handle: 0.0,
         }
     }
 }

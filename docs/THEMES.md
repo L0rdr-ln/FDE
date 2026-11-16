@@ -88,10 +88,11 @@ brings Clearlooks, Onyx, Mikachu, Nightmare and more) and choose it in Settings 
 
 What is used from the theme (`NAME/openbox-3/themerc` and the `.xbm` bitmaps next to it): the title bar,
 label and border textures (solid, gradient in every direction, raised or sunken with bevel, interlaced,
-borders), the label text colours and justification, the border width and paddings, and the button
-bitmaps (`close.xbm`, `max.xbm`, `max_toggled.xbm`, `iconify.xbm`) in the theme's button colour. The accent colour of
-the task bar and menus is taken from the middle of the title bar.
+borders), the label text colours and justification, the border width and paddings, the handle at the bottom
+with its grips, the buttons (bitmaps `close.xbm`, `max.xbm`, `max_toggled.xbm`, `iconify.xbm`, and the `_hover` and
+`_pressed` ones, in the theme's colours for each state), and the colours of the menu (the window menu is drawn
+with them). The accent colour of the task bar and start menu is taken from the middle of the title bar.
 
-What is not used: the handle at the bottom with its grips, the window icon and the shade, desktop and sticky buttons,
-the pressed and hover looks of the buttons, menu and on-screen-display colours, and the theme's font. Frames in an
-Openbox theme are flat pictures: no blur, no shadow, no glass.
+What is not used: the window icon and the shade, desktop and sticky buttons, on-screen-display colours, the
+gradients of the menu (its flat colours are used), and the theme's font. Frames in an Openbox theme are flat
+pictures: no blur, no shadow, no glass.

@@ -142,6 +142,11 @@ pub struct Fde {
     pub screencopy: crate::screencopy::Screencopy,
     pub wobbles: Vec<(Window, crate::wobble::Wobble)>,
     /// clicks that spread a ring: where (shared space) and when
+    /// the left button is down (the Openbox button look for "pressed")
+    pub button_down: bool,
+    /// the pointer has been in the hot corner since this moment, and may open the overview again
+    pub corner_since: Option<Instant>,
+    pub corner_armed: bool,
     pub ripples: Vec<(Point<f64, Logical>, Instant)>,
     /// the clock of the drifting bubbles
     pub started: Instant,
@@ -411,6 +416,9 @@ impl Fde {
             xwayland_shell_state,
             screencopy: Default::default(),
             wobbles: Vec::new(),
+            button_down: false,
+            corner_since: None,
+            corner_armed: true,
             ripples: Vec::new(),
             started: Instant::now(),
             sprites: None,
