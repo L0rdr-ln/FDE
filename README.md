@@ -1,10 +1,8 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="FDE logo" width="128">
+# Frutiger Desktop Environment
 
-# FDE
-
-**Frutiger Desktop Environment: a Wayland desktop with real glass.**
+**A Wayland desktop with real glass.**
 
 [![build](https://github.com/L0rdr-ln/FDE/actions/workflows/build.yml/badge.svg)](https://github.com/L0rdr-ln/FDE/actions/workflows/build.yml)
 [![license MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
