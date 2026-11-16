@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="assets/logo.svg" alt="FDE" width="440">
+# FDE
 
 <br>
 
