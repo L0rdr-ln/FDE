@@ -193,24 +193,36 @@ fn appearance_page(cfg: &Config, status: &Status) -> GBox {
     let st3 = status.clone();
     wobbly.connect_active_notify(move |sw| st3.report(config::set(&path(), &model::wobbly(sw.is_active()))));
     body.append(&row("Wobbly windows", &wobbly));
-    // the big effects
-    let minimize_names = ["lamp", "shrink"];
-    let close_names = ["shatter", "fold", "fade"];
-    let minimize = gtk4::DropDown::from_strings(&["Poured into the task bar (lamp)", "Shrink"]);
-    minimize.set_selected(minimize_names.iter().position(|n| *n == a.minimize_effect).unwrap_or(0) as u32);
-    let close = gtk4::DropDown::from_strings(&["Breaks like glass", "Switched off like a television", "Fades"]);
-    close.set_selected(close_names.iter().position(|n| *n == a.close_effect).unwrap_or(0) as u32);
-    let (m2, c2, st5) = (minimize.clone(), close.clone(), status.clone());
+    // the big effects: each is a drop-down of names for the words in the configuration
+    let effect_row = |title: &str, current: &str, words: &'static [&'static str], labels: &[&str]| -> (gtk4::DropDown, GBox) {
+        let dd = gtk4::DropDown::from_strings(labels);
+        dd.set_selected(words.iter().position(|w| *w == current).unwrap_or(0) as u32);
+        let r = row(title, &dd);
+        (dd, r)
+    };
+    const MINIMIZE: &[&str] = &["lamp", "shrink"];
+    const CLOSE: &[&str] = &["shatter", "fold", "fade"];
+    const OPEN: &[&str] = &["unfold", "pop"];
+    const WORKSPACE: &[&str] = &["cube", "none"];
+    const SWITCHER: &[&str] = &["flip3d", "strip"];
+    let (minimize, r1) = effect_row("Minimize effect", &a.minimize_effect, MINIMIZE, &["Poured into the task bar (lamp)", "Shrink"]);
+    let (close, r2) = effect_row("Close effect", &a.close_effect, CLOSE, &["Breaks like glass", "Switched off like a television", "Fades"]);
+    let (open, r3) = effect_row("Open effect", &a.open_effect, OPEN, &["Unrolls from the title bar", "Fades in"]);
+    let (workspace, r4) = effect_row("Switching workspaces", &a.workspace_effect, WORKSPACE, &["The desktop turns like a cube", "Plain"]);
+    let (switcher, r5) = effect_row("Alt+Tab", &a.switcher_effect, SWITCHER, &["Flip 3D stack", "Row of small pictures"]);
+    let all = [minimize.clone(), close.clone(), open.clone(), workspace.clone(), switcher.clone()];
+    let st5 = status.clone();
     let save = std::rc::Rc::new(move || {
-        let m = minimize_names.get(m2.selected() as usize).copied().unwrap_or("lamp");
-        let c = close_names.get(c2.selected() as usize).copied().unwrap_or("shatter");
-        st5.report(config::set(&path(), &model::effects(m, c)));
+        let word = |i: usize, words: &'static [&'static str]| words.get(all[i].selected() as usize).copied().unwrap_or(words[0]);
+        st5.report(config::set(&path(), &model::effects(word(0, MINIMIZE), word(1, CLOSE), word(2, OPEN), word(3, WORKSPACE), word(4, SWITCHER))));
     });
-    let s1 = save.clone();
-    minimize.connect_selected_notify(move |_| s1());
-    close.connect_selected_notify(move |_| save());
-    body.append(&row("Minimize effect", &minimize));
-    body.append(&row("Close effect", &close));
+    for dd in [&minimize, &close, &open, &workspace, &switcher] {
+        let s = save.clone();
+        dd.connect_selected_notify(move |_| s());
+    }
+    for r in [r1, r2, r3, r4, r5] {
+        body.append(&r);
+    }
     outer
 }
 

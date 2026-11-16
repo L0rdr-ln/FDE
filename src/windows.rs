@@ -116,6 +116,24 @@ impl Fde {
         crate::effects::MinimizeEffect::parse(&self.config.appearance.minimize_effect)
     }
 
+    /// How a new window appears.
+    pub fn open_effect(&self) -> crate::effects::OpenEffect {
+        if !self.config.appearance.animations || self.fast_mode() {
+            return crate::effects::OpenEffect::Pop;
+        }
+        crate::effects::OpenEffect::parse(&self.config.appearance.open_effect)
+    }
+
+    /// Does switching workspaces turn the desktop like a cube?
+    pub fn cube_enabled(&self) -> bool {
+        self.config.appearance.animations && !self.fast_mode() && self.config.appearance.workspace_effect == "cube"
+    }
+
+    /// Is Alt+Tab the turned stack of windows?
+    pub fn flip3d_enabled(&self) -> bool {
+        self.config.appearance.animations && !self.fast_mode() && self.config.appearance.switcher_effect == "flip3d"
+    }
+
     /// How a closed window goes.
     pub fn close_effect(&self) -> crate::effects::CloseEffect {
         if !self.config.appearance.animations || self.fast_mode() {
@@ -135,7 +153,7 @@ impl Fde {
         };
         match opened {
             Some(t) => {
-                let seconds = if from_bar { self.minimize_effect().seconds() } else { OPEN_SECONDS };
+                let seconds = if from_bar { self.minimize_effect().seconds() } else { self.open_effect().seconds() };
                 (t.elapsed().as_secs_f32() / seconds).clamp(0.0, 1.0)
             }
             None => 1.0,
@@ -597,6 +615,9 @@ impl Fde {
 
     pub fn tick_animations(&mut self) {
         self.ghosts.retain(|g| g.since.elapsed().as_secs_f32() < g.effect.seconds());
+        if self.cube.as_ref().is_some_and(|c| c.since.elapsed().as_secs_f32() >= crate::effects::CUBE_SECONDS) {
+            self.cube = None;
+        }
         self.step_wobbles();
         self.update_fractional_scales();
         let done: Vec<Window> = self

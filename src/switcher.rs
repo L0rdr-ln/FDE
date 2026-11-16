@@ -11,6 +11,9 @@ use crate::state::Fde;
 pub struct Switcher {
     pub windows: Vec<Window>,
     pub index: usize,
+    /// where the Flip 3D stack is turned to now (follows `index` smoothly), and when that was updated
+    pub pos: f64,
+    pub pos_time: std::time::Instant,
 }
 
 impl Fde {
@@ -41,7 +44,7 @@ impl Fde {
             if windows.len() < 2 {
                 return;
             }
-            self.switcher = Some(Switcher { windows, index: 0 });
+            self.switcher = Some(Switcher { windows, index: 0, pos: 0.0, pos_time: std::time::Instant::now() });
         }
         if let Some(sw) = &mut self.switcher {
             let n = sw.windows.len() as i32;

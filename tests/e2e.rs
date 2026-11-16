@@ -1471,6 +1471,157 @@ fn the_lamp_pours_a_minimized_window_into_the_bottom_and_pours_it_back() {
     assert!(looks_like_window(pixel(&grab_scene(&mut renderer, &mut scene), w, corner.0, corner.1)), "whole again where it was");
 }
 
+/// A harness with the big effects on, for the effect tests below.
+fn effects_harness(dir: &std::path::Path, socket_name: &str) -> Option<(smithay::backend::renderer::gles::GlesRenderer, Harness, Glass, GlesTexture)> {
+    std::env::set_var("FDE_BUILTIN_SKY", "1");
+    std::env::set_var("XDG_RUNTIME_DIR", dir);
+    let mut renderer = match offscreen_renderer() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("no GL context here ({e}): effect test skipped");
+            return None;
+        }
+    };
+    let (w, h) = (800, 600);
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (w, h).into());
+    state.config.appearance.performance = "quality".into();
+    state.config.appearance.wobbly_windows = false;
+    let socket = ListeningSocket::bind(socket_name).unwrap();
+    let hn = Harness { display, state, socket, ordinary_clients: false };
+    let glass = Glass::new(&mut renderer).unwrap();
+    let scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
+    Some((renderer, hn, glass, scene))
+}
+
+#[test]
+fn a_new_window_unrolls_from_its_title_bar() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-unfold") else { return };
+    hn.state.config.appearance.open_effect = "unfold".into();
+    open_window(&mut hn, dir.path(), "fde-e2e-unfold", 300, 200);
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    let seconds = hn.state.open_effect().seconds();
+    assert!(seconds > 0.3, "it takes its time");
+    let blue = |px: [i32; 3]| px[2] > 150 && px[0] < 100 && px[1] < 100;
+    let (low_x, low_y) = (g.loc.x + g.size.w / 2, g.loc.y + g.size.h - 20);
+    // the first frame compiles the shaders and takes long: do it before looking at time
+    hn.state.set_open_start(&win, Instant::now() - Duration::from_secs(10));
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let mut seen_low = vec![];
+    for (n, p) in [0.1f32, 0.25, 1.0].into_iter().enumerate() {
+        hn.state.set_open_start(&win, Instant::now() - Duration::from_secs_f32(seconds * p));
+        hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+        let bytes = grab_scene(&mut renderer, &mut scene);
+        dump_frame(&bytes, 800, 600, "unfold", n);
+        seen_low.push(blue(pixel(&bytes, 800, low_x, low_y)));
+    }
+    assert_eq!(seen_low, vec![false, false, true], "the lower part of the window is not there yet while it unrolls");
+}
+
+#[test]
+fn switching_workspaces_turns_the_desktop_like_a_cube() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-cube") else { return };
+    hn.state.config.appearance.workspace_effect = "cube".into();
+    hn.state.config.appearance.open_effect = "pop".into();
+    open_window(&mut hn, dir.path(), "fde-e2e-cube", 300, 200);
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    hn.state.set_open_start(&win, Instant::now() - Duration::from_secs(10));
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    let blue = |px: [i32; 3]| px[2] > 150 && px[0] < 100 && px[1] < 100;
+    let (cx, cy) = (g.loc.x + g.size.w / 2, g.loc.y + g.size.h / 2);
+    // a few frames, so that the cube has the picture it will turn away from
+    for _ in 0..3 {
+        hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    }
+    assert!(blue(pixel(&grab_scene(&mut renderer, &mut scene), 800, cx, cy)));
+    assert!(hn.state.last_frame.is_some(), "the last picture is kept");
+
+    hn.state.switch_workspace(1);
+    assert!(hn.state.cube.is_some(), "the cube starts turning");
+    let seconds = fde::effects::CUBE_SECONDS;
+    let mut frames = vec![];
+    for (n, p) in [0.5f32, 0.65, 0.8].into_iter().enumerate() {
+        hn.state.cube.as_mut().unwrap().since = Instant::now() - Duration::from_secs_f32(seconds * p);
+        hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+        let bytes = grab_scene(&mut renderer, &mut scene);
+        dump_frame(&bytes, 800, 600, "cube", n);
+        frames.push(bytes);
+    }
+    // the old workspace (with the blue window) is turning away to the left: its window is no
+    // longer in the middle of the screen, and the picture has dark edges (the space behind the cube)
+    for bytes in &frames {
+        assert!(!blue(pixel(bytes, 800, cx, cy)), "the window has left its place");
+    }
+    let corners_dark = frames[1].chunks(4).take(1).any(|p| p[0] < 30);
+    assert!(corners_dark, "the top left corner of the screen is the dark space behind the cube");
+    // done: the new workspace (empty) is shown plainly, and the cube is gone
+    hn.state.cube.as_mut().unwrap().since = Instant::now() - Duration::from_secs(10);
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    assert!(hn.state.cube.is_none());
+    let after = grab_scene(&mut renderer, &mut scene);
+    assert!(!blue(pixel(&after, 800, cx, cy)));
+    assert!(pixel(&after, 800, 40, 40)[2] > 120, "the sky");
+    // with the effect off, nothing turns
+    hn.state.config.appearance.workspace_effect = "none".into();
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    hn.state.switch_workspace(0);
+    assert!(hn.state.cube.is_none());
+}
+
+#[test]
+fn alt_tab_can_show_the_windows_as_a_turned_stack() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-flip") else { return };
+    hn.state.config.appearance.switcher_effect = "flip3d".into();
+    hn.state.config.appearance.open_effect = "pop".into();
+    for i in 0..3 {
+        open_window(&mut hn, dir.path(), &format!("fde-e2e-flip"), 260 + 20 * i, 180);
+    }
+    let wins: Vec<_> = hn.state.space.elements().cloned().collect();
+    for w in &wins {
+        hn.state.set_open_start(w, Instant::now() - Duration::from_secs(10));
+    }
+    hn.state.switcher_step(1);
+    assert!(hn.state.switcher.is_some());
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let first = grab_scene(&mut renderer, &mut scene);
+    dump_frame(&first, 800, 600, "flip", 0);
+    // the stack is drawn: the dim backdrop darkens the corners and a window is up at the front
+    assert!(pixel(&first, 800, 5, 5)[2] < 125, "the desktop is dimmed behind the stack: {:?}", pixel(&first, 800, 5, 5));
+    let blue_count = |bytes: &[u8]| (0..600).step_by(6).map(|y| (0..800).step_by(6).filter(|&x| { let p = pixel(bytes, 800, x, y); p[2] > 150 && p[0] < 100 && p[1] < 100 }).count()).sum::<usize>();
+    assert!(blue_count(&first) > 40, "the windows' pictures are there");
+    // choosing the next window turns the stack: the picture changes over a few frames and settles
+    hn.state.switcher_step(1);
+    assert!(hn.state.animating(), "the stack is turning");
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    std::thread::sleep(Duration::from_millis(40));
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let mid = grab_scene(&mut renderer, &mut scene);
+    dump_frame(&mid, 800, 600, "flip", 1);
+    assert_ne!(first, mid, "the stack moved");
+    let t0 = Instant::now();
+    while hn.state.animating() {
+        hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+        assert!(t0.elapsed() < Duration::from_secs(5), "the stack settles");
+        std::thread::sleep(Duration::from_millis(16));
+    }
+    let settled = grab_scene(&mut renderer, &mut scene);
+    dump_frame(&settled, 800, 600, "flip", 2);
+    assert_ne!(first, settled);
+    // with the strip chosen instead the old row of small pictures is drawn (a panel in the middle)
+    hn.state.config.appearance.switcher_effect = "strip".into();
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let strip = grab_scene(&mut renderer, &mut scene);
+    assert_ne!(strip, settled);
+}
+
 #[test]
 fn a_wallpaper_picture_from_the_configuration_is_what_the_monitor_shows() {
     let dir = tempfile::tempdir().unwrap();

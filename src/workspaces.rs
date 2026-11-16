@@ -39,6 +39,12 @@ impl Fde {
         if n >= self.workspace_count() || n == self.workspace {
             return;
         }
+        // the desktop turns like a cube: from the picture of the workspace that is left
+        if self.cube_enabled() {
+            if let Some(from) = self.last_frame.take() {
+                self.cube = Some(crate::state::CubeState { since: std::time::Instant::now(), dir: if n > self.workspace { 1 } else { -1 }, from });
+            }
+        }
         // take the windows of this workspace off the screen, back to front
         let leaving: Vec<Window> = self.space.elements().cloned().collect();
         for w in leaving {

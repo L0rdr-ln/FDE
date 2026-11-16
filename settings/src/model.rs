@@ -39,11 +39,15 @@ pub fn wobbly(on: bool) -> Vec<(&'static str, Setting)> {
     vec![("appearance.wobbly_windows", Setting::Bool(on))]
 }
 
-/// The two big effects: `minimize` is `lamp` or `shrink`, `close` is `shatter`, `fold` or `fade`.
-pub fn effects(minimize: &str, close: &str) -> Vec<(&'static str, Setting)> {
+/// The big effects: `minimize` is `lamp` or `shrink`, `close` is `shatter`, `fold` or `fade`,
+/// `open` is `unfold` or `pop`, `workspace` is `cube` or `none`, `switcher` is `flip3d` or `strip`.
+pub fn effects(minimize: &str, close: &str, open: &str, workspace: &str, switcher: &str) -> Vec<(&'static str, Setting)> {
     vec![
         ("appearance.minimize_effect", Setting::Str(minimize.to_string())),
         ("appearance.close_effect", Setting::Str(close.to_string())),
+        ("appearance.open_effect", Setting::Str(open.to_string())),
+        ("appearance.workspace_effect", Setting::Str(workspace.to_string())),
+        ("appearance.switcher_effect", Setting::Str(switcher.to_string())),
     ]
 }
 
@@ -238,8 +242,8 @@ mod tests {
 
     #[test]
     fn the_effects_are_written_as_words() {
-        let changes = effects("lamp", "fold");
-        assert_eq!(changes[0].0, "appearance.minimize_effect");
-        assert_eq!(changes[1].0, "appearance.close_effect");
+        let changes = effects("lamp", "fold", "unfold", "cube", "flip3d");
+        let keys: Vec<&str> = changes.iter().map(|c| c.0).collect();
+        assert_eq!(keys, ["appearance.minimize_effect", "appearance.close_effect", "appearance.open_effect", "appearance.workspace_effect", "appearance.switcher_effect"]);
     }
 }

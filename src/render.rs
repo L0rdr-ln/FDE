@@ -378,6 +378,19 @@ impl Fde {
                     alpha = 1.0;
                     zoom = 1.0;
                 }
+                // a new window unrolls from its title bar
+                if warp.is_none() && self.minimize_progress(window).is_none() && !info_from_bar(window) && self.open_effect() == crate::effects::OpenEffect::Unfold {
+                    let p = self.open_progress(window);
+                    if p < 1.0 {
+                        let m = 24.0;
+                        let rect = (outer_full.loc.x as f64 - m, outer_full.loc.y as f64 - m, outer_full.size.w as f64 + 2.0 * m, outer_full.size.h as f64 + 2.0 * m);
+                        let (pts, a) = crate::effects::unfold(p as f64, rect, crate::wobble::N);
+                        let pts = pts.into_iter().map(|(x, y)| (((x as f64 - view.origin.x as f64) * view.scale) as f32, ((y as f64 - view.origin.y as f64) * view.scale) as f32)).collect();
+                        warp = Some((pts, a));
+                        alpha = 1.0;
+                        zoom = 1.0;
+                    }
+                }
                 // minimizing: fade and shrink towards the task bar button (or the bottom middle)
                 let mut shift = (0.0f64, 0.0f64);
                 if let (Some(p), true) = (self.minimize_progress(window), warp.is_none()) {
@@ -619,7 +632,7 @@ impl Fde {
         // the window switcher: the windows as small pictures, the chosen one lit
         let pointer_here = self.output_at(self.pointer_location).map(|o| &o == output).unwrap_or(false);
         if self.switcher.is_some() && pointer_here {
-            self.draw_switcher(renderer, scene, size, view)?;
+            self.draw_switcher(renderer, glass, scene, size, view)?;
         }
 
         if self.help_open && pointer_here {
@@ -628,6 +641,11 @@ impl Fde {
 
         if self.window_menu.as_ref().is_some_and(|m| m.rect().intersection(out_rect).is_some()) {
             self.draw_window_menu(renderer, scene, size, view)?;
+        }
+
+        // the workspace cube: the picture just drawn is the new workspace, the old one turns away
+        if output == &self.output && !self.locked {
+            self.draw_cube(renderer, glass, scene, size)?;
         }
 
         // "Workspace 2" for a moment after switching
@@ -787,10 +805,14 @@ impl Fde {
     fn draw_switcher(
         &mut self,
         renderer: &mut GlesRenderer,
+        glass: &Glass,
         scene: &mut GlesTexture,
         size: Size<i32, Physical>,
         view: View,
     ) -> Result<(), GlesError> {
+        if self.flip3d_enabled() {
+            return self.draw_flip3d(renderer, glass, scene, size, view);
+        }
         let Some(sw) = &self.switcher else { return Ok(()) };
         let (windows, index) = (sw.windows.clone(), sw.index);
         let full = Rectangle::<i32, Physical>::from_size(size);
@@ -849,6 +871,153 @@ impl Fde {
             frame.render_texture_from_to(tex, src, *dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, 1.0, None, &[])?;
         }
         let _ = frame.finish()?;
+        Ok(())
+    }
+
+    /// Alt+Tab as a stack of windows turned towards the middle, receding to the right (Flip 3D).
+    /// Each window is drawn into a picture of its own, then warped onto its place in the stack.
+    fn draw_flip3d(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        glass: &Glass,
+        scene: &mut GlesTexture,
+        size: Size<i32, Physical>,
+        view: View,
+    ) -> Result<(), GlesError> {
+        let full = Rectangle::<i32, Physical>::from_size(size);
+        // turn the stack towards the chosen window (the short way round)
+        let (windows, index, pos) = {
+            let Some(sw) = self.switcher.as_mut() else { return Ok(()) };
+            let n = sw.windows.len() as f64;
+            let dt = sw.pos_time.elapsed().as_secs_f64().min(0.1);
+            sw.pos_time = std::time::Instant::now();
+            let mut delta = (sw.index as f64 - sw.pos).rem_euclid(n);
+            if delta > n / 2.0 {
+                delta -= n;
+            }
+            sw.pos = (sw.pos + delta * (1.0 - (-dt * 14.0).exp())).rem_euclid(n);
+            if (sw.index as f64 - sw.pos).abs() < 0.004 || (sw.index as f64 - sw.pos).abs() > n - 0.004 {
+                sw.pos = sw.index as f64;
+            }
+            (sw.windows.clone(), sw.index, sw.pos)
+        };
+        let n = windows.len();
+        // every window's place in the stack: how far behind the chosen one (negative: just passed)
+        let mut order: Vec<(f64, usize)> = (0..n)
+            .map(|k| {
+                let mut d = (k as f64 - pos).rem_euclid(n as f64);
+                if d > n as f64 / 2.0 {
+                    d -= n as f64;
+                }
+                (d, k)
+            })
+            .filter(|(d, _)| d.abs() < 6.0)
+            .collect();
+        order.sort_by(|a, b| b.0.abs().partial_cmp(&a.0.abs()).unwrap_or(std::cmp::Ordering::Equal));
+
+        // each window into a picture of its own
+        let mut pictures: Vec<(GlesTexture, (f64, f64), f64)> = Vec::new();
+        for (d, k) in &order {
+            let w = &windows[*k];
+            let g = w.geometry();
+            let (pw, ph) = (((g.size.w.max(1) as f64) * view.scale).round() as i32, ((g.size.h.max(1) as f64) * view.scale).round() as i32);
+            let mut tex = create_scene(renderer, (pw, ph).into())?;
+            let at = smithay::utils::Point::<i32, Physical>::from((-(g.loc.x as f64 * view.scale).round() as i32, -(g.loc.y as f64 * view.scale).round() as i32));
+            let elements = w.render_elements::<WaylandSurfaceRenderElement<GlesRenderer>>(renderer, at, smithay::utils::Scale::from(view.scale), 1.0);
+            let own = Rectangle::<i32, Physical>::from_size((pw, ph).into());
+            {
+                let mut target = renderer.bind(&mut tex)?;
+                let mut frame = renderer.render(&mut target, (pw, ph).into(), Transform::Normal)?;
+                frame.clear(Color32F::new(0.0, 0.0, 0.0, 0.0), &[own])?;
+                draw_render_elements(&mut frame, view.scale, &elements, &[own])?;
+                let _ = frame.finish()?;
+            }
+            pictures.push((tex, (pw as f64, ph as f64), *d));
+        }
+        let title = windows.get(index).map(|w| self.window_title(w)).unwrap_or_default();
+        let title_img = self.text.line(&title, size.w / 2, 18.0 * view.scale as f32, [255, 255, 255], Some(([8, 40, 90], 0.95)), (4.0 * view.scale) as i32);
+        let title_tex = match &title_img {
+            Some(img) => Some((renderer.import_memory(&img.rgba, Fourcc::Abgr8888, Size::<i32, BufferCoord>::from((img.width, img.height)), false)?, img.width, img.height)),
+            None => None,
+        };
+
+        let backdrop = self.wallpapers.get(&(size.w, size.h)).cloned();
+        let mut target = renderer.bind(scene)?;
+        let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+        // the desktop's wallpaper alone (the windows are in the stack), dimmed
+        if let Some(wp) = backdrop {
+            let src = Rectangle::<f64, BufferCoord>::from_size((wp.size().w as f64, wp.size().h as f64).into());
+            frame.render_texture_from_to(&wp, src, full, &[full], &[], Transform::Normal, 1.0, None, &[])?;
+        }
+        frame.draw_solid(full, &[full], Color32F::new(0.0, 0.02, 0.07, 0.55))?;
+        let m = 10;
+        for (tex, (pw, ph), d) in &pictures {
+            let (pts, a) = crate::effects::flip(*d, size.w as f64, size.h as f64, *pw, *ph, m);
+            if a > 0.002 {
+                glass.mesh.draw_part(&mut frame, tex, (size.w, size.h), &pts, m, a, (0.0, 0.0, 1.0, 1.0))?;
+            }
+        }
+        if let Some((tex, tw, th)) = &title_tex {
+            let dest = Rectangle::<i32, Physical>::new(((size.w - tw) / 2, size.h - size.h / 8 - th / 2).into(), (*tw, *th).into());
+            let src = Rectangle::<f64, BufferCoord>::from_size((*tw as f64, *th as f64).into());
+            frame.render_texture_from_to(tex, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, 1.0, None, &[])?;
+        }
+        let _ = frame.finish()?;
+        Ok(())
+    }
+
+    /// The turning workspace cube, or (when none is turning) a copy of this picture for the next
+    /// one. `scene` holds the new workspace's picture on the way in.
+    fn draw_cube(
+        &mut self,
+        renderer: &mut GlesRenderer,
+        glass: &Glass,
+        scene: &mut GlesTexture,
+        size: Size<i32, Physical>,
+    ) -> Result<(), GlesError> {
+        let full = Rectangle::<i32, Physical>::from_size(size);
+        let copy = |renderer: &mut GlesRenderer, from: &GlesTexture, to: &mut GlesTexture| -> Result<(), GlesError> {
+            let src = Rectangle::<f64, BufferCoord>::from_size((from.size().w as f64, from.size().h as f64).into());
+            let mut target = renderer.bind(to)?;
+            let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+            frame.clear(Color32F::new(0.0, 0.0, 0.0, 0.0), &[full])?;
+            frame.render_texture_from_to(from, src, full, &[full], &[], Transform::Normal, 1.0, None, &[])?;
+            let _ = frame.finish()?;
+            Ok(())
+        };
+        let turning = self.cube.as_ref().map(|c| (c.since.elapsed().as_secs_f32() / crate::effects::CUBE_SECONDS, c.dir, c.from.size()));
+        match turning {
+            Some((t, dir, from_size)) if t < 1.0 && (from_size.w, from_size.h) == (size.w, size.h) => {
+                let mut to = create_scene(renderer, size)?;
+                copy(renderer, scene, &mut to)?;
+                let n = 14;
+                let faces = crate::effects::cube(t as f64, dir, size.w as f64, size.h as f64, n);
+                let from = self.cube.as_ref().expect("turning").from.clone();
+                let mut target = renderer.bind(scene)?;
+                let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+                frame.clear(Color32F::new(0.01, 0.03, 0.08, 1.0), &[full])?;
+                for (face, tex) in faces.iter().zip([&from, &to]) {
+                    if face.1 > 0.002 {
+                        glass.mesh.draw_part(&mut frame, tex, (size.w, size.h), &face.0, n, face.1, (0.0, 0.0, 1.0, 1.0))?;
+                    }
+                }
+                let _ = frame.finish()?;
+            }
+            Some(_) => self.cube = None,
+            None => {
+                // remember this picture: the next workspace switch turns away from it
+                if self.cube_enabled() {
+                    let mut keep = match self.last_frame.take() {
+                        Some(t) if (t.size().w, t.size().h) == (size.w, size.h) => t,
+                        _ => create_scene(renderer, size)?,
+                    };
+                    copy(renderer, scene, &mut keep)?;
+                    self.last_frame = Some(keep);
+                } else {
+                    self.last_frame = None;
+                }
+            }
+        }
         Ok(())
     }
 

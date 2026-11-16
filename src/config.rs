@@ -28,6 +28,12 @@ pub struct Appearance {
     pub wobbly_windows: bool,
     /// how a minimized window goes to the task bar: `lamp` (poured into its button like a genie) or `shrink`
     pub minimize_effect: String,
+    /// how a new window appears: `unfold` (rolls down from its title bar) or `pop` (fades in)
+    pub open_effect: String,
+    /// switching workspaces: `cube` (the desktop turns like a cube) or `none`
+    pub workspace_effect: String,
+    /// Alt+Tab: `flip3d` (the windows as a turned stack) or `strip` (small pictures in a row)
+    pub switcher_effect: String,
     /// how a closed window goes away: `shatter` (breaks like glass), `fold` (switched off like a television) or `fade`
     pub close_effect: String,
     /// "auto" (fast mode when the graphics are software-drawn, as in a VM without 3D), "quality" or "fast" (one blur pass, no drop shadows, no wobble)
@@ -40,7 +46,7 @@ pub struct Appearance {
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.46, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, minimize_effect: "lamp".into(), close_effect: "shatter".into(), performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
+        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.46, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, minimize_effect: "lamp".into(), open_effect: "unfold".into(), workspace_effect: "cube".into(), switcher_effect: "flip3d".into(), close_effect: "shatter".into(), performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
     }
 }
 
@@ -294,6 +300,15 @@ impl Config {
         }
         if !["lamp", "genie", "shrink"].contains(&self.appearance.minimize_effect.as_str()) {
             return Err("appearance.minimize_effect must be \"lamp\" or \"shrink\"".into());
+        }
+        if !["unfold", "pop"].contains(&self.appearance.open_effect.as_str()) {
+            return Err("appearance.open_effect must be \"unfold\" or \"pop\"".into());
+        }
+        if !["cube", "none"].contains(&self.appearance.workspace_effect.as_str()) {
+            return Err("appearance.workspace_effect must be \"cube\" or \"none\"".into());
+        }
+        if !["flip3d", "strip"].contains(&self.appearance.switcher_effect.as_str()) {
+            return Err("appearance.switcher_effect must be \"flip3d\" or \"strip\"".into());
         }
         if !["shatter", "glass", "fold", "tv", "fade"].contains(&self.appearance.close_effect.as_str()) {
             return Err("appearance.close_effect must be \"shatter\", \"fold\" or \"fade\"".into());
@@ -614,5 +629,14 @@ mod write_tests {
         c.appearance.close_effect = "fold".into();
         c.appearance.minimize_effect = "spin".into();
         assert!(c.validate().unwrap_err().contains("minimize_effect"));
+        c.appearance.minimize_effect = "lamp".into();
+        c.appearance.workspace_effect = "sphere".into();
+        assert!(c.validate().unwrap_err().contains("workspace_effect"));
+        c.appearance.workspace_effect = "none".into();
+        c.appearance.switcher_effect = "carousel".into();
+        assert!(c.validate().unwrap_err().contains("switcher_effect"));
+        c.appearance.switcher_effect = "strip".into();
+        c.appearance.open_effect = "explode".into();
+        assert!(c.validate().unwrap_err().contains("open_effect"));
     }
 }

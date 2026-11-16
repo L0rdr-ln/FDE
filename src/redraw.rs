@@ -113,6 +113,8 @@ impl Fde {
         !self.ghosts.is_empty()
             || !self.wobbles.is_empty()
             || self.hud.is_some()
+            || self.cube.is_some()
+            || self.switcher.as_ref().is_some_and(|s| self.flip3d_enabled() && (s.pos - s.index as f64).abs() > 0.004)
             || self.space.elements().any(|w| self.open_progress(w) < 1.0 || self.minimize_progress(w).is_some())
     }
 

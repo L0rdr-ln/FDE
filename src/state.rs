@@ -28,6 +28,14 @@ pub struct Snapshot {
     pub scale: f64,
 }
 
+/// The desktop turning like a cube after a workspace switch: the picture of the workspace that
+/// was left, and which way the cube turns (+1: to the left).
+pub struct CubeState {
+    pub since: Instant,
+    pub dir: i32,
+    pub from: smithay::backend::renderer::gles::GlesTexture,
+}
+
 /// A window that has gone and is fading out.
 pub struct Ghost {
     pub snapshot: Snapshot,
@@ -131,6 +139,11 @@ pub struct Fde {
     pub xwayland_shell_state: smithay::wayland::xwayland_shell::XWaylandShellState,
     pub screencopy: crate::screencopy::Screencopy,
     pub wobbles: Vec<(Window, crate::wobble::Wobble)>,
+    /// the workspace cube is turning
+    pub cube: Option<CubeState>,
+    /// the last picture of the first monitor (what the cube turns away from); kept only while the
+    /// workspace effect is on
+    pub last_frame: Option<smithay::backend::renderer::gles::GlesTexture>,
     pub switcher: Option<crate::switcher::Switcher>,
     /// the graphics are drawn by the CPU (a VM without 3D): `appearance.performance = "auto"` then uses fast mode
     pub software_renderer: bool,
@@ -371,6 +384,8 @@ impl Fde {
             xwayland_shell_state,
             screencopy: Default::default(),
             wobbles: Vec::new(),
+            cube: None,
+            last_frame: None,
             switcher: None,
             software_renderer: false,
             redraw_serial: 1,

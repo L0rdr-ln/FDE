@@ -11,6 +11,9 @@ gloss = 0.8            # gloss band on the title bar, 0 .. 1
 performance = "auto"   # auto: "fast" when the graphics are software-drawn (a VM without 3D); "quality" or "fast" (one blur pass, no shadows, no wobble)
 wobbly_windows = true  # windows bend and swing on springs while you drag them
 minimize_effect = "lamp"   # "lamp" (poured into the task bar button, and out again) or "shrink"
+open_effect = "unfold"      # "unfold" (rolls down from the title bar) or "pop" (fades in)
+workspace_effect = "cube"   # "cube" (the desktop turns when you switch workspaces) or "none"
+switcher_effect = "flip3d"  # Alt+Tab: "flip3d" (a turned stack of windows) or "strip" (small pictures in a row)
 close_effect = "shatter"   # "shatter" (breaks like glass), "fold" (switched off like a television) or "fade"
 animations = true      # windows fade and grow in when they open and shrink into the task bar when minimized
 cursor_theme = ""      # an XCursor theme (a folder with cursors/ in ~/.icons, /usr/share/icons ...); empty = $XCURSOR_THEME

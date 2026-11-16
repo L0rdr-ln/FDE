@@ -58,6 +58,34 @@ impl CloseEffect {
     }
 }
 
+/// How a new window appears.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OpenEffect {
+    /// fades in and grows a little
+    Pop,
+    /// unrolls downwards from its title bar, with a small overshoot
+    Unfold,
+}
+
+impl OpenEffect {
+    pub fn parse(s: &str) -> OpenEffect {
+        match s {
+            "unfold" => OpenEffect::Unfold,
+            _ => OpenEffect::Pop,
+        }
+    }
+
+    pub fn seconds(self) -> f32 {
+        match self {
+            OpenEffect::Pop => 0.18,
+            OpenEffect::Unfold => 0.38,
+        }
+    }
+}
+
+/// How long the workspace cube takes to turn.
+pub const CUBE_SECONDS: f32 = 0.55;
+
 /// A rectangle: left, top, width, height.
 pub type Rect = (f64, f64, f64, f64);
 
@@ -120,6 +148,85 @@ pub fn fold(p: f64, rect: Rect, n: usize) -> (Vec<(f32, f32)>, f32) {
     }
     let alpha = (1.0 - smooth((p - 0.9) / 0.1)) as f32;
     (pts, alpha)
+}
+
+/// A window unrolling: the grid of `rect` `p` (0 .. 1) of the way, its top edge fixed and its
+/// bottom edge running down past the end a little and coming back. Returns the points and how
+/// opaque it is (it is fully visible after the first quarter).
+pub fn unfold(p: f64, rect: Rect, n: usize) -> (Vec<(f32, f32)>, f32) {
+    let (x, y, w, h) = rect;
+    let p = p.clamp(0.0, 1.0);
+    // ease-out with overshoot ("back"): 0 -> about 1.06 -> 1
+    let c1 = 1.2;
+    let t = p - 1.0;
+    let grow = (1.0 + (c1 + 1.0) * t * t * t + c1 * t * t).max(0.02);
+    let wide = 0.94 + 0.06 * smooth(p * 1.5); // the width opens a little too
+    let cx = x + w / 2.0;
+    let mut pts = Vec::with_capacity(n * n);
+    for i in 0..n {
+        let v = i as f64 / (n - 1) as f64;
+        for j in 0..n {
+            let u = j as f64 / (n - 1) as f64 - 0.5;
+            pts.push(((cx + u * w * wide) as f32, (y + v * h * grow) as f32));
+        }
+    }
+    (pts, smooth(p * 4.0) as f32)
+}
+
+/// The two faces of the workspace cube while it turns: the one that leaves (`.0`) and the one
+/// that arrives (`.1`), each as `n` x `n` points on the screen of `w` x `h` pixels and how bright it
+/// is (a face turned away is darker). `dir` is +1 when the cube turns to the left (the next
+/// workspace comes in from the right) and -1 the other way. `p` is 0 .. 1.
+pub fn cube(p: f64, dir: i32, w: f64, h: f64, n: usize) -> [(Vec<(f32, f32)>, f32); 2] {
+    let p = smooth(p);
+    let theta = p * PI / 2.0;
+    let sign = if dir >= 0 { 1.0 } else { -1.0 };
+    let face = |phi: f64| -> (Vec<(f32, f32)>, f32) {
+        let r = w / 2.0;
+        let camera = 1.8 * w;
+        let (cx, cy) = (w / 2.0, h / 2.0);
+        let mut pts = Vec::with_capacity(n * n);
+        for i in 0..n {
+            let v = i as f64 / (n - 1) as f64 - 0.5;
+            for j in 0..n {
+                let x = (j as f64 / (n - 1) as f64 - 0.5) * w;
+                let xr = x * phi.cos() + r * phi.sin();
+                let zr = -x * phi.sin() + r * phi.cos();
+                let s = camera / (camera - (zr - r));
+                pts.push(((cx + xr * s) as f32, (cy + v * h * s) as f32));
+            }
+        }
+        // a face turned too far away to be seen from the camera (its back would show) is not drawn
+        let seen = phi.cos() > r / (camera + r);
+        (pts, if seen { (1.0 - 0.6 * phi.abs() / (PI / 2.0)) as f32 } else { 0.0 })
+    };
+    [face(-sign * theta), face(sign * (PI / 2.0 - theta))]
+}
+
+/// One window of the window stack (Flip 3D), `d` places from the chosen one (0 = the chosen one at
+/// the front; 1, 2, ... behind it; a fraction while the stack turns), as `n` x `n` points on a
+/// screen of `w` x `h` pixels, for a picture `pw` x `ph` pixels (shown at most that big), and how
+/// opaque it is. The windows are turned towards the middle and recede to the right.
+pub fn flip(d: f64, w: f64, h: f64, pw: f64, ph: f64, n: usize) -> (Vec<(f32, f32)>, f32) {
+    let k = (0.56 * w / pw.max(1.0)).min(0.56 * h / ph.max(1.0)).min(1.5);
+    let (hw, hh) = (pw * k / 2.0, ph * k / 2.0);
+    let yaw: f64 = 0.62; // about 35 degrees
+    let camera = 1.7 * w;
+    let ad = d.abs();
+    let centre = (w * (0.30 + 0.13 * d), h * (0.52 - 0.045 * d), -0.28 * w * ad);
+    let mut pts = Vec::with_capacity(n * n);
+    for i in 0..n {
+        let y = (i as f64 / (n - 1) as f64 - 0.5) * 2.0 * hh;
+        for j in 0..n {
+            let x = (j as f64 / (n - 1) as f64 - 0.5) * 2.0 * hw;
+            let xr = x * yaw.cos();
+            let zr = -x * yaw.sin(); // the right edge is farther away
+            let s = camera / (camera - (centre.2 + zr));
+            pts.push(((w / 2.0 + (centre.0 - w / 2.0 + xr) * s) as f32, (h / 2.0 + (centre.1 - h / 2.0 + y) * s) as f32));
+        }
+    }
+    let alpha = (1.0 - 0.08 * ad).clamp(0.35, 1.0) * (1.0 - (ad - 5.0).clamp(0.0, 1.0));
+    (pts, alpha as f32)
 }
 
 /// One torn-off piece of a window: its four corners (top left, top right, bottom left, bottom
@@ -284,5 +391,83 @@ mod tests {
     #[test]
     fn the_same_time_gives_the_same_picture() {
         assert_eq!(shatter(0.37, R, 8, 6), shatter(0.37, R, 8, 6));
+    }
+
+    #[test]
+    fn a_window_unrolls_from_its_top_edge() {
+        let n = 7;
+        let (start, a0) = unfold(0.0, R, n);
+        assert!(start[n * n - 1].1 - start[0].1 < 20.0, "almost flat at the start");
+        assert!(a0 < 0.01);
+        assert!((start[0].1 - 80.0).abs() < 1e-3, "the top edge stays");
+        let (mid, _) = unfold(0.5, R, n);
+        assert!(mid[n * n - 1].1 > start[n * n - 1].1);
+        // the bottom runs a little past the final size and comes back
+        let bottom = |p: f64| unfold(p, R, n).0[n * n - 1].1;
+        assert!((0..=100).any(|k| bottom(k as f64 / 100.0) > 380.5), "overshoots");
+        let (end, a1) = unfold(1.0, R, n);
+        assert!((end[n * n - 1].1 - 380.0).abs() < 1e-2 && (end[n * n - 1].0 - 500.0).abs() < 1e-2 && a1 == 1.0);
+        assert_eq!(OpenEffect::parse("unfold"), OpenEffect::Unfold);
+        assert_eq!(OpenEffect::parse("pop"), OpenEffect::Pop);
+    }
+
+    #[test]
+    fn the_cube_turns_one_face_away_and_the_next_in() {
+        let (w, h, n) = (800.0, 600.0, 9);
+        let [out, inc] = cube(0.0, 1, w, h, n);
+        assert!((out.0[0].0).abs() < 1e-2 && (out.0[0].1).abs() < 1e-2, "the old face is the screen");
+        assert!((out.0[n * n - 1].0 - 800.0).abs() < 1e-2 && (out.0[n * n - 1].1 - 600.0).abs() < 1e-2);
+        assert_eq!(out.1, 1.0);
+        // the new face is still behind the corner: not seen
+        assert_eq!(inc.1, 0.0);
+        let [out, inc] = cube(1.0, 1, w, h, n);
+        assert_eq!(out.1, 0.0, "the old one has turned out of sight");
+        assert!((inc.0[0].0).abs() < 1e-2 && (inc.0[n * n - 1].0 - 800.0).abs() < 1e-2, "the new one is the screen");
+        assert_eq!(inc.1, 1.0);
+        // halfway the two meet in the middle and are equally bright
+        let [out, inc] = cube(0.5, 1, w, h, n);
+        assert!((out.1 - inc.1).abs() < 1e-3);
+        let right_of_out = out.0[n - 1].0; // top right of the leaving face
+        let left_of_in = inc.0[0].0; // top left of the arriving one
+        assert!((right_of_out - left_of_in).abs() < 1.0, "they share an edge: {right_of_out} {left_of_in}");
+        // the other way round mirrors it
+        // turning the other way mirrors it: the leaving face moves to the right
+        let [out_l, _] = cube(0.5, -1, w, h, n);
+        let [out_r, _] = cube(0.5, 1, w, h, n);
+        assert!(out_l.0[0].0 > out_r.0[0].0 + 100.0);
+    }
+
+    #[test]
+    fn the_cube_edge_in_the_middle_is_taller_near_the_viewer() {
+        let [out, inc] = cube(0.5, 1, 800.0, 600.0, 9);
+        let height = |f: &(Vec<(f32, f32)>, f32), col: usize| f.0[8 * 9 + col].1 - f.0[col].1;
+        // the shared edge is the leaving face's right side and the arriving face's left side
+        assert!((height(&out, 8) - height(&inc, 0)).abs() < 1.0);
+        assert!(height(&out, 8) < height(&out, 0) + 1.0 || height(&out, 8) > 0.0);
+    }
+
+    #[test]
+    fn the_stack_recedes_to_the_right_and_gets_smaller() {
+        let (w, h, n) = (1280.0, 800.0, 6);
+        let width = |p: &(Vec<(f32, f32)>, f32)| p.0[n - 1].0 - p.0[0].0;
+        let left = |p: &(Vec<(f32, f32)>, f32)| p.0[0].0;
+        let front = flip(0.0, w, h, 700.0, 500.0, n);
+        let second = flip(1.0, w, h, 700.0, 500.0, n);
+        let fifth = flip(4.0, w, h, 700.0, 500.0, n);
+        assert!(width(&front) > width(&second) && width(&second) > width(&fifth), "smaller behind");
+        assert!(left(&front) < left(&second) && left(&second) < left(&fifth), "to the right behind");
+        assert_eq!(front.1, 1.0);
+        assert!(fifth.1 < front.1, "dimmer behind");
+        // each window's right edge is farther away than its left: it is shorter
+        let edge = |p: &(Vec<(f32, f32)>, f32), col: usize| p.0[(n - 1) * n + col].1 - p.0[col].1;
+        assert!(edge(&front, n - 1) < edge(&front, 0), "turned: the right edge is shorter");
+        // a window of any size stays on the screen
+        let big = flip(0.0, w, h, 4000.0, 3000.0, n);
+        assert!(big.0.iter().all(|&(x, y)| x >= 0.0 && x <= 1280.0 && y >= 0.0 && y <= 800.0));
+        // very far back is invisible
+        assert_eq!(flip(9.0, w, h, 700.0, 500.0, n).1, 0.0);
+        // fractions in between are continuous
+        let a = flip(0.5, w, h, 700.0, 500.0, n).0[0].0;
+        assert!(a > left(&front) && a < left(&second));
     }
 }
