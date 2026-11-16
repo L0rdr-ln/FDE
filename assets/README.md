@@ -6,6 +6,9 @@
   back to its generated sky (`wallpaper::bundled()` returns None only if the file cannot be
   decoded; delete the `include_bytes!` line in `src/wallpaper.rs` and `configured()` falls back).
 
+- `logo.svg`: the FDE logo, a glass orb with sky and a hill. Original, drawn by hand as SVG,
+  MIT like the rest of the project.
+
 Everything else in the project's artwork is generated in code.
 
 There is no mascot yet. `docs/MASCOT.md` has the design brief and a picture prompt.
