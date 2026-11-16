@@ -51,6 +51,10 @@ pub fn effects(minimize: &str, close: &str, open: &str, workspace: &str, switche
     ]
 }
 
+pub fn fun(bubbles: bool, ripples: bool) -> Vec<(&'static str, Setting)> {
+    vec![("appearance.bubbles", Setting::Bool(bubbles)), ("appearance.click_ripples", Setting::Bool(ripples))]
+}
+
 pub fn keyboard(layout: &str, repeat_rate: u32, repeat_delay: u32) -> Vec<(&'static str, Setting)> {
     vec![
         ("input.keyboard_layout", Setting::Str(layout.trim().to_string())),

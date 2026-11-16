@@ -32,7 +32,7 @@ wlroots can't read back what is behind a window, so it can't do this.
 ## Features
 
 - **Compositor:** glass window frames, snapping, tiling, workspaces, XWayland, multi-monitor with a scale per monitor, layer-shell, screen capture, clipboard, and drag and drop
-- **Effects:** wobbly windows, a genie minimize, a glass-shattering close, a workspace cube and Flip 3D Alt+Tab
+- **Effects:** wobbly windows, a genie minimize, a close that shatters or burns the window away, a workspace cube, Flip 3D Alt+Tab, an overview of all windows, and optional soap bubbles and click ripples
 - **Task bar and start menu** (`fde-panel`): window list, pinned programs, app search, volume, network, battery, calendar and a notification history
 - **Notifications** (`fde-notify`), **lock screen** (`fde-lock`), **login screen** (`fde-greeter`) and **screenshots** (`fde-shot`)
 - **Settings app** (`fde-settings`): a GTK4 control panel, and the desktop updates as you change things
@@ -76,6 +76,7 @@ issue. See [docs/HARDWARE.md](docs/HARDWARE.md).
 | **Windows key** | Start menu |
 | **Alt+Return** | Terminal |
 | **Alt+Tab** | Switch windows |
+| **Super+Tab** | Overview of all windows |
 | **Alt+drag** | Move a window |
 | **Alt+Left / Right** | Snap to half the screen |
 | **Alt+T** | Tile windows |

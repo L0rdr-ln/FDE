@@ -29,6 +29,7 @@ enum Action {
     CancelSwitcher,
     ToggleDnd,
     ToggleHelp,
+    ToggleExpo,
     WindowMenu,
     Tile,
     NextLayout,
@@ -54,6 +55,7 @@ enum Action {
 pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Alt+Return", "open a terminal"),
     ("Alt+Tab", "switch windows (hold Alt; Shift+Tab goes back)"),
+    ("Super+Tab", "the overview of all windows (click one; Esc leaves)"),
     ("Alt+Q / Alt+F4", "close the window"),
     ("Alt+F", "maximize or restore"),
     ("Alt+Left / Right", "snap to the left or right half"),
@@ -145,6 +147,10 @@ impl Fde {
                             if let Some(a) = a {
                                 return FilterResult::Intercept(a);
                             }
+                        }
+                        // the overview: Super+Tab opens it, Escape or Super+Tab again leaves it
+                        if event.state() == KeyState::Pressed && (mods.logo && sym == keysyms::KEY_Tab || state.expo.is_some() && sym == keysyms::KEY_Escape) {
+                            return FilterResult::Intercept(Action::ToggleExpo);
                         }
                         if event.state() == KeyState::Pressed && mods.logo && sym == keysyms::KEY_space {
                             return FilterResult::Intercept(Action::NextLayout);
@@ -322,6 +328,7 @@ impl Fde {
             Action::CancelSwitcher => self.switcher_cancel(),
             Action::ToggleDnd => self.toggle_do_not_disturb(),
             Action::ToggleHelp => self.help_open = !self.help_open,
+            Action::ToggleExpo => self.toggle_expo(),
             Action::WindowMenu => {
                 if let Some(w) = self.space.elements().last().cloned() {
                     let at = self.outer_of(&w).map(|o| (o.loc.x as f64 + 8.0, o.loc.y as f64 + 8.0).into()).unwrap_or(self.pointer_location);
@@ -454,6 +461,12 @@ impl Fde {
 
         let serial = SERIAL_COUNTER.next_serial();
         let Some(ptr) = self.seat.get_pointer() else { return };
+        // in the overview the pointer only lights windows
+        if self.expo.is_some() {
+            self.expo_motion(pos);
+            self.hover_cursor = "default";
+            return;
+        }
         // over the open window menu, the pointer is ours
         if self.window_menu_motion(pos) && self.window_menu.as_ref().is_some_and(|m| m.rect().to_f64().contains(pos)) {
             self.hover_cursor = "default";
@@ -500,9 +513,19 @@ impl Fde {
         self.super_alone = false;
         let serial = SERIAL_COUNTER.next_serial();
         let pos = self.pointer_location;
+        if pressed && !self.locked && self.config.appearance.click_ripples && self.ripples_enabled() {
+            self.ripples.push((pos, std::time::Instant::now()));
+            self.ripples.truncate(8);
+        }
 
         if self.locked {
             // straight to the lock screen
+        } else if pressed && self.expo.is_some() {
+            self.expo_click(pos);
+            self.swallow_release = true;
+            return;
+        } else if !pressed && self.expo.is_some() {
+            return;
         } else if pressed && self.window_menu.is_some() {
             // a row is chosen, a click anywhere else closes the menu; the click goes nowhere else
             self.window_menu_click(pos);

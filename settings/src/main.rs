@@ -193,6 +193,20 @@ fn appearance_page(cfg: &Config, status: &Status) -> GBox {
     let st3 = status.clone();
     wobbly.connect_active_notify(move |sw| st3.report(config::set(&path(), &model::wobbly(sw.is_active()))));
     body.append(&row("Wobbly windows", &wobbly));
+    // bubbles and ripples
+    let bubbles = gtk4::Switch::new();
+    bubbles.set_active(a.bubbles);
+    bubbles.set_halign(Align::Start);
+    let ripples = gtk4::Switch::new();
+    ripples.set_active(a.click_ripples);
+    ripples.set_halign(Align::Start);
+    let (b2, r2s, st6) = (bubbles.clone(), ripples.clone(), status.clone());
+    let save_fun = std::rc::Rc::new(move || st6.report(config::set(&path(), &model::fun(b2.is_active(), r2s.is_active()))));
+    let sf = save_fun.clone();
+    bubbles.connect_active_notify(move |_| sf());
+    ripples.connect_active_notify(move |_| save_fun());
+    body.append(&row("Soap bubbles on the desktop", &bubbles));
+    body.append(&row("Ripples when you click", &ripples));
     // the big effects: each is a drop-down of names for the words in the configuration
     let effect_row = |title: &str, current: &str, words: &'static [&'static str], labels: &[&str]| -> (gtk4::DropDown, GBox) {
         let dd = gtk4::DropDown::from_strings(labels);
@@ -201,12 +215,12 @@ fn appearance_page(cfg: &Config, status: &Status) -> GBox {
         (dd, r)
     };
     const MINIMIZE: &[&str] = &["lamp", "shrink"];
-    const CLOSE: &[&str] = &["shatter", "fold", "fade"];
+    const CLOSE: &[&str] = &["shatter", "fold", "burn", "fade"];
     const OPEN: &[&str] = &["unfold", "pop"];
     const WORKSPACE: &[&str] = &["cube", "none"];
     const SWITCHER: &[&str] = &["flip3d", "strip"];
     let (minimize, r1) = effect_row("Minimize effect", &a.minimize_effect, MINIMIZE, &["Poured into the task bar (lamp)", "Shrink"]);
-    let (close, r2) = effect_row("Close effect", &a.close_effect, CLOSE, &["Breaks like glass", "Switched off like a television", "Fades"]);
+    let (close, r2) = effect_row("Close effect", &a.close_effect, CLOSE, &["Breaks like glass", "Switched off like a television", "Burns away", "Fades"]);
     let (open, r3) = effect_row("Open effect", &a.open_effect, OPEN, &["Unrolls from the title bar", "Fades in"]);
     let (workspace, r4) = effect_row("Switching workspaces", &a.workspace_effect, WORKSPACE, &["The desktop turns like a cube", "Plain"]);
     let (switcher, r5) = effect_row("Alt+Tab", &a.switcher_effect, SWITCHER, &["Flip 3D stack", "Row of small pictures"]);

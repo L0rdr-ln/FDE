@@ -129,6 +129,16 @@ impl Fde {
         self.config.appearance.animations && !self.fast_mode() && self.config.appearance.workspace_effect == "cube"
     }
 
+    /// Do bubbles drift behind the windows?
+    pub fn bubbles_enabled(&self) -> bool {
+        self.config.appearance.animations && !self.fast_mode() && self.config.appearance.bubbles && !self.locked
+    }
+
+    /// Do clicks spread rings?
+    pub fn ripples_enabled(&self) -> bool {
+        self.config.appearance.animations && !self.fast_mode()
+    }
+
     /// Is Alt+Tab the turned stack of windows?
     pub fn flip3d_enabled(&self) -> bool {
         self.config.appearance.animations && !self.fast_mode() && self.config.appearance.switcher_effect == "flip3d"
@@ -615,6 +625,8 @@ impl Fde {
 
     pub fn tick_animations(&mut self) {
         self.ghosts.retain(|g| g.since.elapsed().as_secs_f32() < g.effect.seconds());
+        self.tick_expo();
+        self.ripples.retain(|(_, t)| t.elapsed().as_secs_f32() < crate::effects::RIPPLE_SECONDS);
         if self.cube.as_ref().is_some_and(|c| c.since.elapsed().as_secs_f32() >= crate::effects::CUBE_SECONDS) {
             self.cube = None;
         }

@@ -1623,6 +1623,143 @@ fn alt_tab_can_show_the_windows_as_a_turned_stack() {
 }
 
 #[test]
+fn soap_bubbles_drift_over_the_wallpaper_and_can_be_switched_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-bubbles") else { return };
+    hn.state.config.appearance.bubbles = true;
+    assert!(hn.state.bubbles_enabled());
+    assert!(hn.state.animating(), "bubbles keep the picture moving");
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap(); // shaders, sprites
+    let with = grab_scene(&mut renderer, &mut scene);
+    dump_frame(&with, 800, 600, "bubbles", 0);
+    hn.state.config.appearance.bubbles = false;
+    assert!(!hn.state.bubbles_enabled());
+    assert!(!hn.state.animating(), "nothing moves without them");
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let without = grab_scene(&mut renderer, &mut scene);
+    let differing = with.chunks(4).zip(without.chunks(4)).filter(|(a, b)| (0..3).map(|c| (a[c] as i32 - b[c] as i32).abs()).sum::<i32>() > 12).count();
+    assert!(differing > 400, "the bubbles are drawn: {differing} pixels differ");
+    // the bubbles are drawn behind windows: a window covers them
+    hn.state.config.appearance.bubbles = true;
+    open_window(&mut hn, dir.path(), "fde-e2e-bubbles", 700, 500);
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    hn.state.set_open_start(&win, Instant::now() - Duration::from_secs(10));
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let a = grab_scene(&mut renderer, &mut scene);
+    hn.state.started -= Duration::from_secs(5);
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let b = grab_scene(&mut renderer, &mut scene);
+    let inside = (g.loc.x + 10..g.loc.x + g.size.w - 10).step_by(3).all(|x| (g.loc.y + 10..g.loc.y + g.size.h - 10).step_by(3).all(|y| pixel(&a, 800, x, y) == pixel(&b, 800, x, y)));
+    assert!(inside, "inside the window the picture does not change as bubbles move");
+}
+
+#[test]
+fn a_click_spreads_a_ring_that_fades() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-ripple") else { return };
+    hn.state.config.appearance.bubbles = false;
+    hn.state.config.appearance.click_ripples = true;
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let before = grab_scene(&mut renderer, &mut scene);
+    hn.state.pointer_location = (300.0, 250.0).into();
+    hn.state.pointer_button(0x110, true, 0);
+    assert_eq!(hn.state.ripples.len(), 1);
+    assert!(hn.state.animating());
+    // a little way into it: the ring (radius about 50 px) is bright against the sky
+    hn.state.ripples[0].1 = Instant::now() - Duration::from_millis(180);
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let mid = grab_scene(&mut renderer, &mut scene);
+    dump_frame(&mid, 800, 600, "ripple", 0);
+    let changed = (0..360).filter(|k| {
+        let a = (*k as f64).to_radians();
+        (30..90).any(|r| {
+            let (x, y) = (300 + (a.cos() * r as f64) as i32, 250 + (a.sin() * r as f64) as i32);
+            (0..3).map(|c| (pixel(&mid, 800, x, y)[c] - pixel(&before, 800, x, y)[c]).abs()).sum::<i32>() > 15
+        })
+    }).count();
+    assert!(changed > 270, "a ring all the way round ({changed} of 360 directions)");
+    // later it is gone
+    hn.state.ripples[0].1 = Instant::now() - Duration::from_secs(5);
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    assert!(hn.state.ripples.is_empty() && !hn.state.animating());
+    let after = grab_scene(&mut renderer, &mut scene);
+    assert_eq!(pixel(&after, 800, 330, 250), pixel(&before, 800, 330, 250));
+    // switched off: no rings
+    hn.state.config.appearance.click_ripples = false;
+    hn.state.pointer_button(0x110, true, 0);
+    assert!(hn.state.ripples.is_empty());
+}
+
+#[test]
+fn the_overview_lays_out_all_windows_and_a_click_picks_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-expo") else { return };
+    hn.state.config.appearance.bubbles = false;
+    hn.state.config.appearance.open_effect = "pop".into();
+    for _ in 0..3 {
+        open_window(&mut hn, dir.path(), "fde-e2e-expo", 300, 200);
+    }
+    let wins: Vec<_> = hn.state.space.elements().cloned().collect();
+    assert_eq!(wins.len(), 3);
+    for w in &wins {
+        hn.state.set_open_start(w, Instant::now() - Duration::from_secs(10));
+    }
+    let top = hn.state.space.elements().last().cloned().unwrap();
+    let blue = |px: [i32; 3]| px[2] > 150 && px[0] < 100 && px[1] < 100;
+
+    hn.state.toggle_expo();
+    assert!(hn.state.expo.is_some());
+    assert!(hn.state.animating(), "the windows glide");
+    // wait for the glide (shaders first, then time)
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    hn.state.expo.as_mut().unwrap().since = Instant::now() - Duration::from_secs(5);
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let bytes = grab_scene(&mut renderer, &mut scene);
+    dump_frame(&bytes, 800, 600, "expo", 0);
+    let cells = hn.state.expo_cells();
+    assert_eq!(cells.len(), 3);
+    for (i, c) in cells.iter().enumerate() {
+        let (x, y) = ((c.loc.x + c.size.w / 2.0) as i32, (c.loc.y + c.size.h / 2.0) as i32);
+        assert!(blue(pixel(&bytes, 800, x, y)), "window {i} is in its place at {x},{y}");
+    }
+    // the windows' old places are bare (or covered by other cells): the corner of the first window
+    // before the overview is no longer blue unless a cell lies there
+    // moving over a window lights it
+    let c1 = cells[1];
+    hn.state.pointer_location = (c1.loc.x + 5.0, c1.loc.y + 5.0).into();
+    hn.state.expo_motion(hn.state.pointer_location);
+    assert_eq!(hn.state.expo.as_ref().unwrap().hover, Some(1));
+    // clicking the one at the back (the last in the list is the deepest) brings it to the front
+    let deepest = hn.state.expo.as_ref().unwrap().windows[2].clone();
+    assert_ne!(deepest, top);
+    let c2 = cells[2];
+    hn.state.pointer_location = (c2.loc.x + c2.size.w / 2.0, c2.loc.y + c2.size.h / 2.0).into();
+    hn.state.pointer_button(0x110, true, 0);
+    assert_eq!(hn.state.space.elements().last().cloned().unwrap(), deepest, "the chosen window is in front now");
+    assert!(hn.state.expo.as_ref().unwrap().closing.is_some(), "the windows glide back");
+    hn.state.pointer_button(0x110, false, 1);
+    hn.state.expo.as_mut().unwrap().closing = Some(Instant::now() - Duration::from_secs(5));
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    assert!(hn.state.expo.is_none(), "the overview is over");
+    // Escape-style leaving, and an empty desktop has nothing to show
+    hn.state.toggle_expo();
+    assert!(hn.state.expo.is_some());
+    hn.state.toggle_expo();
+    assert!(hn.state.expo.as_ref().unwrap().closing.is_some());
+    hn.state.expo = None;
+    for w in hn.state.space.elements().cloned().collect::<Vec<_>>() {
+        hn.state.space.unmap_elem(&w);
+    }
+    hn.state.toggle_expo();
+    assert!(hn.state.expo.is_none(), "no windows, no overview");
+}
+
+#[test]
 fn a_wallpaper_picture_from_the_configuration_is_what_the_monitor_shows() {
     let dir = tempfile::tempdir().unwrap();
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
@@ -3068,6 +3205,11 @@ fn a_closed_window_fades_out_instead_of_vanishing() {
 #[test]
 fn a_closed_window_breaks_like_glass() {
     a_closed_window_goes_away_with("shatter", 1000);
+}
+
+#[test]
+fn a_closed_window_burns_away() {
+    a_closed_window_goes_away_with("burn", 1300);
 }
 
 #[test]
