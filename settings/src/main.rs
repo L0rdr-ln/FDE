@@ -193,6 +193,24 @@ fn appearance_page(cfg: &Config, status: &Status) -> GBox {
     let st3 = status.clone();
     wobbly.connect_active_notify(move |sw| st3.report(config::set(&path(), &model::wobbly(sw.is_active()))));
     body.append(&row("Wobbly windows", &wobbly));
+    // the big effects
+    let minimize_names = ["lamp", "shrink"];
+    let close_names = ["shatter", "fold", "fade"];
+    let minimize = gtk4::DropDown::from_strings(&["Poured into the task bar (lamp)", "Shrink"]);
+    minimize.set_selected(minimize_names.iter().position(|n| *n == a.minimize_effect).unwrap_or(0) as u32);
+    let close = gtk4::DropDown::from_strings(&["Breaks like glass", "Switched off like a television", "Fades"]);
+    close.set_selected(close_names.iter().position(|n| *n == a.close_effect).unwrap_or(0) as u32);
+    let (m2, c2, st5) = (minimize.clone(), close.clone(), status.clone());
+    let save = std::rc::Rc::new(move || {
+        let m = minimize_names.get(m2.selected() as usize).copied().unwrap_or("lamp");
+        let c = close_names.get(c2.selected() as usize).copied().unwrap_or("shatter");
+        st5.report(config::set(&path(), &model::effects(m, c)));
+    });
+    let s1 = save.clone();
+    minimize.connect_selected_notify(move |_| s1());
+    close.connect_selected_notify(move |_| save());
+    body.append(&row("Minimize effect", &minimize));
+    body.append(&row("Close effect", &close));
     outer
 }
 

@@ -32,6 +32,7 @@ pub struct Snapshot {
 pub struct Ghost {
     pub snapshot: Snapshot,
     pub since: Instant,
+    pub effect: crate::effects::CloseEffect,
 }
 
 /// Per-window state kept in the window's user data.
@@ -52,6 +53,8 @@ pub struct WinInfo {
     pub opened: Option<std::time::Instant>,
     /// the window is shrinking into the task bar since this moment
     pub minimizing: Option<std::time::Instant>,
+    /// the opening comes out of the task bar button (a restored window), not from nothing
+    pub from_bar: bool,
     /// where its task bar button is (set by the task bar), to shrink towards
     pub minimize_target: Option<Rectangle<i32, Logical>>,
     /// where it was when it was minimized

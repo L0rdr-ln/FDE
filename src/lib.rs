@@ -12,6 +12,7 @@ pub mod cursortheme;
 pub mod demo;
 pub mod flyout;
 pub mod foreign_toplevel;
+pub mod effects;
 pub mod gestures;
 pub mod greetd;
 pub mod hotkeys;

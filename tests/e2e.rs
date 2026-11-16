@@ -1024,6 +1024,15 @@ fn grab_scene(renderer: &mut smithay::backend::renderer::gles::GlesRenderer, sce
     renderer.map_texture(&m).unwrap().to_vec()
 }
 
+/// With `FDE_EFFECT_FRAMES=<dir>` the effect tests also write the pictures they look at there
+/// (`<name>-<n>.png`), to see the animations by eye.
+fn dump_frame(bytes: &[u8], w: i32, h: i32, name: &str, n: usize) {
+    if let Some(dir) = std::env::var_os("FDE_EFFECT_FRAMES") {
+        let path = std::path::Path::new(&dir).join(format!("{name}-{n}.png"));
+        fde::demo::write_png(path.to_str().unwrap(), bytes, w, h, false).unwrap();
+    }
+}
+
 #[test]
 fn a_window_on_the_second_monitor_is_drawn_there_and_the_pointer_and_maximize_follow() {
     let dir = tempfile::tempdir().unwrap();
@@ -1393,6 +1402,73 @@ fn minimizing_shrinks_into_the_task_bar_button_and_restoring_brings_it_back() {
     assert!(hn.state.space.elements().any(|e| *e == win));
     assert_eq!(hn.state.space.element_geometry(&win).unwrap().loc, g.loc, "where it was");
     assert!(hn.state.minimize_progress(&win).is_none());
+}
+
+#[test]
+fn the_lamp_pours_a_minimized_window_into_the_bottom_and_pours_it_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("FDE_BUILTIN_SKY", "1");
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let mut renderer = match offscreen_renderer() {
+        Ok(r) => r,
+        Err(e) => {
+            eprintln!("no GL context here ({e}): lamp test skipped");
+            return;
+        }
+    };
+    let (w, h) = (800, 600);
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (w, h).into());
+    state.config.appearance.minimize_effect = "lamp".into();
+    state.config.appearance.performance = "quality".into();
+    let socket = ListeningSocket::bind("fde-e2e-lamp").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let glass = Glass::new(&mut renderer).unwrap();
+    let mut scene: GlesTexture = create_scene(&mut renderer, (w, h).into()).unwrap();
+    open_window(&mut hn, dir.path(), "fde-e2e-lamp", 240, 160);
+    let win = hn.state.space.elements().next().cloned().unwrap();
+    hn.state.set_open_start(&win, Instant::now() - Duration::from_secs(10));
+    let g = hn.state.space.element_geometry(&win).unwrap();
+    let corner = (g.loc.x + 8, g.loc.y + 8);
+    let looks_like_window = |px: [i32; 3]| px[1] < 90 && px[2] > 120;
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    assert!(looks_like_window(pixel(&grab_scene(&mut renderer, &mut scene), w, corner.0, corner.1)), "the window is there");
+
+    // four fifths of the way: the top corner has left, and the window is gathered at the bottom
+    hn.state.minimize_window(&win);
+    let seconds = hn.state.minimize_effect().seconds();
+    assert!(seconds > 0.3, "the lamp takes its time");
+    if std::env::var_os("FDE_EFFECT_FRAMES").is_some() {
+        for (n, at) in [0.25f32, 0.5, 0.7].into_iter().enumerate() {
+            hn.state.set_minimize_start(&win, Instant::now() - Duration::from_secs_f32(seconds * at));
+            hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+            let frame = grab_scene(&mut renderer, &mut scene);
+            dump_frame(&frame, w, h, "lamp", n);
+        }
+    }
+    hn.state.set_minimize_start(&win, Instant::now() - Duration::from_secs_f32(seconds * 0.8));
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let bytes = grab_scene(&mut renderer, &mut scene);
+    assert!(!looks_like_window(pixel(&bytes, w, corner.0, corner.1)), "the corner is empty sky");
+    // the desktop alone, for comparison (the animation over)
+    hn.state.set_minimize_start(&win, Instant::now() - Duration::from_secs(10));
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let sky = grab_scene(&mut renderer, &mut scene);
+    let differs = |a: [i32; 3], b: [i32; 3]| (0..3).map(|c| (a[c] - b[c]).abs()).sum::<i32>() > 40;
+    let low = (330..470).filter(|&x| (500..600).any(|y| differs(pixel(&bytes, w, x, y), pixel(&sky, w, x, y)))).count();
+    assert!(low >= 3, "something of the window is down by the bottom middle ({low} columns)");
+    let high = (0..w).step_by(4).filter(|&x| (0..300).step_by(4).any(|y| differs(pixel(&bytes, w, x, y), pixel(&sky, w, x, y)))).count();
+    assert_eq!(high, 0, "nothing of it is left in the upper half");
+
+    // restoring: it comes back out of the bottom, not from where it was
+    hn.state.tick_animations();
+    hn.state.restore_window();
+    assert!(hn.state.open_progress(&win) < 0.3, "just started coming out");
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    hn.state.set_open_start(&win, Instant::now() - Duration::from_secs(10));
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    assert!(looks_like_window(pixel(&grab_scene(&mut renderer, &mut scene), w, corner.0, corner.1)), "whole again where it was");
 }
 
 #[test]
@@ -2835,6 +2911,20 @@ fn windows_live_on_workspaces_and_only_the_shown_ones_are_on_the_screen() {
 
 #[test]
 fn a_closed_window_fades_out_instead_of_vanishing() {
+    a_closed_window_goes_away_with("fade", 300);
+}
+
+#[test]
+fn a_closed_window_breaks_like_glass() {
+    a_closed_window_goes_away_with("shatter", 1000);
+}
+
+#[test]
+fn a_closed_window_is_switched_off_like_a_television() {
+    a_closed_window_goes_away_with("fold", 600);
+}
+
+fn a_closed_window_goes_away_with(effect: &str, wait_ms: u64) {
     let dir = tempfile::tempdir().unwrap();
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("FDE_BUILTIN_SKY", "1");
@@ -2851,6 +2941,8 @@ fn a_closed_window_fades_out_instead_of_vanishing() {
     let mut state = Fde::new(&display.handle(), (w, h).into());
     state.config.appearance.wobbly_windows = false;
     state.config.appearance.animations = true;
+    state.config.appearance.close_effect = effect.to_string();
+    state.config.appearance.performance = "quality".into();
     let socket = ListeningSocket::bind("fde-e2e-fade").unwrap();
     let mut hn = Harness { display, state, socket, ordinary_clients: false };
     let glass = Glass::new(&mut renderer).unwrap();
@@ -2878,9 +2970,19 @@ fn a_closed_window_fades_out_instead_of_vanishing() {
     assert_eq!(hn.state.ghosts.len(), 1, "its last picture is fading");
     hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
     let fading_px = pixel(&grab_scene(&mut renderer, &mut scene), w, cx, cy);
-    std::thread::sleep(Duration::from_millis(300));
+    if std::env::var_os("FDE_EFFECT_FRAMES").is_some() {
+        let seconds = hn.state.ghosts[0].effect.seconds();
+        for (n, at) in [0.15f32, 0.35, 0.55, 0.8].into_iter().enumerate() {
+            hn.state.ghosts[0].since = Instant::now() - Duration::from_secs_f32(seconds * at);
+            hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+            let frame = grab_scene(&mut renderer, &mut scene);
+            dump_frame(&frame, w, h, effect, n);
+        }
+        hn.state.ghosts[0].since = Instant::now();
+    }
+    std::thread::sleep(Duration::from_millis(wait_ms));
     hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
-    assert!(hn.state.ghosts.is_empty(), "the fade is over");
+    assert!(hn.state.ghosts.is_empty(), "the {effect} is over");
     let gone = pixel(&grab_scene(&mut renderer, &mut scene), w, cx, cy);
     assert_ne!(gone, open_px, "the window's place shows the desktop again: {gone:?}");
     let dist = |a: [i32; 3], b: [i32; 3]| (0..3).map(|c| (a[c] - b[c]).abs()).sum::<i32>();

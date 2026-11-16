@@ -17,8 +17,9 @@ const FRAG: &str = r#"
 precision mediump float;
 varying vec2 v_uv;
 uniform sampler2D tex;
+uniform float alpha;
 void main() {
-    gl_FragColor = texture2D(tex, v_uv);
+    gl_FragColor = texture2D(tex, v_uv) * alpha;
 }
 "#;
 
@@ -28,6 +29,7 @@ pub struct MeshProgram {
     attr_pos: ffi::types::GLint,
     attr_uv: ffi::types::GLint,
     uni_tex: ffi::types::GLint,
+    uni_alpha: ffi::types::GLint,
 }
 
 unsafe fn compile(gl: &ffi::Gles2, kind: ffi::types::GLenum, src: &str) -> Result<ffi::types::GLuint, GlesError> {
@@ -69,6 +71,7 @@ impl MeshProgram {
                 attr_pos: gl.GetAttribLocation(program, b"pos\0".as_ptr() as *const _),
                 attr_uv: gl.GetAttribLocation(program, b"uv\0".as_ptr() as *const _),
                 uni_tex: gl.GetUniformLocation(program, b"tex\0".as_ptr() as *const _),
+                uni_alpha: gl.GetUniformLocation(program, b"alpha\0".as_ptr() as *const _),
             })
         })?
     }
@@ -83,7 +86,23 @@ impl MeshProgram {
         points: &[(f32, f32)],
         n: usize,
     ) -> Result<(), GlesError> {
-        self.draw_with(frame, tex, target, points, n, false)
+        self.draw_with(frame, tex, target, points, n, false, 1.0, (0.0, 0.0, 1.0, 1.0))
+    }
+
+    /// The same, `alpha` see-through (0 .. 1), showing only the part `uv` = (left, top, right,
+    /// bottom) of the texture (each 0 .. 1, y down) stretched over the grid. A torn-off piece of a
+    /// window is a 2 x 2 grid with its piece of the texture.
+    pub fn draw_part(
+        &self,
+        frame: &mut GlesFrame<'_, '_>,
+        tex: &GlesTexture,
+        target: (i32, i32),
+        points: &[(f32, f32)],
+        n: usize,
+        alpha: f32,
+        uv: (f32, f32, f32, f32),
+    ) -> Result<(), GlesError> {
+        self.draw_with(frame, tex, target, points, n, false, alpha, uv)
     }
 
     /// The same, but the picture under it is multiplied with the texture (night light).
@@ -95,7 +114,7 @@ impl MeshProgram {
         points: &[(f32, f32)],
         n: usize,
     ) -> Result<(), GlesError> {
-        self.draw_with(frame, tex, target, points, n, true)
+        self.draw_with(frame, tex, target, points, n, true, 1.0, (0.0, 0.0, 1.0, 1.0))
     }
 
     fn draw_with(
@@ -106,14 +125,16 @@ impl MeshProgram {
         points: &[(f32, f32)],
         n: usize,
         multiply: bool,
+        alpha: f32,
+        uv: (f32, f32, f32, f32),
     ) -> Result<(), GlesError> {
         debug_assert_eq!(points.len(), n * n);
         let mut verts: Vec<f32> = Vec::with_capacity(n * n * 4);
         for i in 0..n {
             for j in 0..n {
                 let (x, y) = points[i * n + j];
-                let u = j as f32 / (n - 1) as f32;
-                let v_img = i as f32 / (n - 1) as f32;
+                let u = uv.0 + (uv.2 - uv.0) * j as f32 / (n - 1) as f32;
+                let v_img = uv.1 + (uv.3 - uv.1) * i as f32 / (n - 1) as f32;
                 let v = if tex.is_y_inverted() { 1.0 - v_img } else { v_img };
                 verts.extend_from_slice(&[x / target.0 as f32 * 2.0 - 1.0, y / target.1 as f32 * 2.0 - 1.0, u, v]);
             }
@@ -139,6 +160,7 @@ impl MeshProgram {
             gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_S, ffi::CLAMP_TO_EDGE as i32);
             gl.TexParameteri(ffi::TEXTURE_2D, ffi::TEXTURE_WRAP_T, ffi::CLAMP_TO_EDGE as i32);
             gl.Uniform1i(this.uni_tex, 0);
+            gl.Uniform1f(this.uni_alpha, alpha);
             gl.Enable(ffi::BLEND);
             if multiply {
                 gl.BlendFunc(ffi::DST_COLOR, ffi::ZERO);

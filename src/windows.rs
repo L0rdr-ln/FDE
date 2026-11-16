@@ -17,10 +17,6 @@ use crate::state::{Fde, WinInfo};
 
 /// The opening animation: a short fade and zoom.
 pub const OPEN_SECONDS: f32 = 0.18;
-/// Shrinking into the task bar.
-pub const MINIMIZE_SECONDS: f32 = 0.22;
-/// Fading out after the window closed.
-pub const CLOSE_SECONDS: f32 = 0.18;
 
 /// How a window looks `p` (0 .. 1) of the way into the task bar: how see-through, how big
 /// (relative) and where its middle is, on the way from `center` to `target`.
@@ -107,7 +103,25 @@ impl Fde {
 
     /// Pretend the window appeared at `at` (a time in the future holds the animation at its start).
     pub fn set_open_start(&mut self, window: &Window, at: std::time::Instant) {
-        info(window).lock().unwrap().opened = Some(at);
+        let mut i = info(window).lock().unwrap();
+        i.opened = Some(at);
+        i.from_bar = false;
+    }
+
+    /// How a minimized window goes (the big effects need the GPU: off with animations and in fast mode).
+    pub fn minimize_effect(&self) -> crate::effects::MinimizeEffect {
+        if !self.config.appearance.animations || self.fast_mode() {
+            return crate::effects::MinimizeEffect::Shrink;
+        }
+        crate::effects::MinimizeEffect::parse(&self.config.appearance.minimize_effect)
+    }
+
+    /// How a closed window goes.
+    pub fn close_effect(&self) -> crate::effects::CloseEffect {
+        if !self.config.appearance.animations || self.fast_mode() {
+            return crate::effects::CloseEffect::Fade;
+        }
+        crate::effects::CloseEffect::parse(&self.config.appearance.close_effect)
     }
 
     /// How far the opening animation of `window` is, 0 (just appeared) .. 1 (done or off).
@@ -115,8 +129,15 @@ impl Fde {
         if !self.config.appearance.animations {
             return 1.0;
         }
-        match info(window).lock().unwrap().opened {
-            Some(t) => (t.elapsed().as_secs_f32() / OPEN_SECONDS).clamp(0.0, 1.0),
+        let (opened, from_bar) = {
+            let i = info(window).lock().unwrap();
+            (i.opened, i.from_bar)
+        };
+        match opened {
+            Some(t) => {
+                let seconds = if from_bar { self.minimize_effect().seconds() } else { OPEN_SECONDS };
+                (t.elapsed().as_secs_f32() / seconds).clamp(0.0, 1.0)
+            }
             None => 1.0,
         }
     }
@@ -512,7 +533,7 @@ impl Fde {
 
     /// How far the window's shrinking into the task bar is (0 .. 1), or None if it is not.
     pub fn minimize_progress(&self, window: &Window) -> Option<f32> {
-        info(window).lock().unwrap().minimizing.map(|t| (t.elapsed().as_secs_f32() / MINIMIZE_SECONDS).clamp(0.0, 1.0))
+        info(window).lock().unwrap().minimizing.map(|t| (t.elapsed().as_secs_f32() / self.minimize_effect().seconds()).clamp(0.0, 1.0))
     }
 
     /// Pretend the shrinking started at `at` (tests: a time in the future holds it at the start).
@@ -575,7 +596,7 @@ impl Fde {
     }
 
     pub fn tick_animations(&mut self) {
-        self.ghosts.retain(|g| g.since.elapsed().as_secs_f32() < CLOSE_SECONDS);
+        self.ghosts.retain(|g| g.since.elapsed().as_secs_f32() < g.effect.seconds());
         self.step_wobbles();
         self.update_fractional_scales();
         let done: Vec<Window> = self
@@ -605,8 +626,11 @@ impl Fde {
             });
             self.space.map_element(w.clone(), loc, true);
             if !was_shrinking {
-                // coming back: the same fade and zoom as a new window
+                // coming back: the same fade and zoom as a new window, or out of its button
                 self.restart_open_animation(&w);
+                if self.minimize_effect() == crate::effects::MinimizeEffect::Lamp && self.minimize_target(&w).is_some() {
+                    info(&w).lock().unwrap().from_bar = true;
+                }
             }
             self.focus_window(&w);
         }
@@ -635,7 +659,8 @@ impl Fde {
     pub fn start_ghost(&mut self, surface: &WlSurface) {
         let id = smithay::reexports::wayland_server::Resource::id(surface);
         if let Some(snapshot) = self.snapshots.remove(&id) {
-            self.ghosts.push(crate::state::Ghost { snapshot, since: std::time::Instant::now() });
+            let effect = self.close_effect();
+            self.ghosts.push(crate::state::Ghost { snapshot, since: std::time::Instant::now(), effect });
         }
     }
 

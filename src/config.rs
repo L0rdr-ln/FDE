@@ -26,6 +26,10 @@ pub struct Appearance {
     pub animations: bool,
     /// windows bend and swing on springs while they are dragged
     pub wobbly_windows: bool,
+    /// how a minimized window goes to the task bar: `lamp` (poured into its button like a genie) or `shrink`
+    pub minimize_effect: String,
+    /// how a closed window goes away: `shatter` (breaks like glass), `fold` (switched off like a television) or `fade`
+    pub close_effect: String,
     /// "auto" (fast mode when the graphics are software-drawn, as in a VM without 3D), "quality" or "fast" (one blur pass, no drop shadows, no wobble)
     pub performance: String,
     /// the mouse cursor theme (a directory with `cursors/` in an icon path); empty = `$XCURSOR_THEME`
@@ -36,7 +40,7 @@ pub struct Appearance {
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.46, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
+        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.46, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, minimize_effect: "lamp".into(), close_effect: "shatter".into(), performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
     }
 }
 
@@ -287,6 +291,12 @@ impl Config {
         }
         if !matches!(self.appearance.performance.as_str(), "auto" | "quality" | "fast") {
             return Err("appearance.performance must be \"auto\", \"quality\" or \"fast\"".into());
+        }
+        if !["lamp", "genie", "shrink"].contains(&self.appearance.minimize_effect.as_str()) {
+            return Err("appearance.minimize_effect must be \"lamp\" or \"shrink\"".into());
+        }
+        if !["shatter", "glass", "fold", "tv", "fade"].contains(&self.appearance.close_effect.as_str()) {
+            return Err("appearance.close_effect must be \"shatter\", \"fold\" or \"fade\"".into());
         }
         crate::theme::Theme::find(&self.appearance.theme).map_err(|e| format!("appearance.theme: {e}"))?;
         parse_color(&self.appearance.accent).ok_or_else(|| format!("appearance.accent: \"{}\" is not #rrggbb", self.appearance.accent))?;
@@ -593,5 +603,16 @@ mod write_tests {
         assert!(set(&f, &[("appearance.blur", Setting::Int(99))]).is_err());
         assert!(set(&f, &[("appearance.accent", Setting::Str("red".into()))]).is_err());
         assert_eq!(std::fs::read_to_string(&f).unwrap(), before);
+    }
+
+    #[test]
+    fn the_effects_are_checked() {
+        let mut c = Config::default();
+        assert!(c.validate().is_ok());
+        c.appearance.close_effect = "explode".into();
+        assert!(c.validate().unwrap_err().contains("close_effect"));
+        c.appearance.close_effect = "fold".into();
+        c.appearance.minimize_effect = "spin".into();
+        assert!(c.validate().unwrap_err().contains("minimize_effect"));
     }
 }

@@ -39,6 +39,14 @@ pub fn wobbly(on: bool) -> Vec<(&'static str, Setting)> {
     vec![("appearance.wobbly_windows", Setting::Bool(on))]
 }
 
+/// The two big effects: `minimize` is `lamp` or `shrink`, `close` is `shatter`, `fold` or `fade`.
+pub fn effects(minimize: &str, close: &str) -> Vec<(&'static str, Setting)> {
+    vec![
+        ("appearance.minimize_effect", Setting::Str(minimize.to_string())),
+        ("appearance.close_effect", Setting::Str(close.to_string())),
+    ]
+}
+
 pub fn keyboard(layout: &str, repeat_rate: u32, repeat_delay: u32) -> Vec<(&'static str, Setting)> {
     vec![
         ("input.keyboard_layout", Setting::Str(layout.trim().to_string())),
@@ -226,5 +234,12 @@ mod tests {
         assert_eq!(hex_color(-1.0, 0.0, 2.0), "#0000ff");
         assert_eq!(hex_color(0.29, 0.66, 0.93), "#4aa8ed");
         assert_eq!(round2(0.3800000011), 0.38);
+    }
+
+    #[test]
+    fn the_effects_are_written_as_words() {
+        let changes = effects("lamp", "fold");
+        assert_eq!(changes[0].0, "appearance.minimize_effect");
+        assert_eq!(changes[1].0, "appearance.close_effect");
     }
 }

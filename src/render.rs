@@ -354,9 +354,33 @@ impl Fde {
                     outer_full.loc.x as f64 + outer_full.size.w as f64 / 2.0,
                     outer_full.loc.y as f64 + outer_full.size.h as f64 / 2.0,
                 );
+                // poured into the task bar button (or out of it): the picture is warped as a grid
+                let lamp_p: Option<f64> = if self.minimize_effect() == crate::effects::MinimizeEffect::Lamp {
+                    match self.minimize_progress(window) {
+                        Some(p) => Some(p as f64),
+                        None if info_from_bar(window) && self.open_progress(window) < 1.0 => Some(1.0 - self.open_progress(window) as f64),
+                        None => None,
+                    }
+                } else {
+                    None
+                };
+                let mut warp: Option<(Vec<(f32, f32)>, f32)> = None;
+                if let Some(p) = lamp_p {
+                    let target = self
+                        .minimize_target(window)
+                        .map(|t| (t.loc.x as f64 + t.size.w as f64 / 2.0, t.loc.y as f64 + t.size.h as f64 / 2.0))
+                        .unwrap_or((out_rect.loc.x as f64 + out_rect.size.w as f64 / 2.0, (out_rect.loc.y + out_rect.size.h) as f64));
+                    let m = 24.0;
+                    let rect = (outer_full.loc.x as f64 - m, outer_full.loc.y as f64 - m, outer_full.size.w as f64 + 2.0 * m, outer_full.size.h as f64 + 2.0 * m);
+                    let (pts, a) = crate::effects::lamp(p, rect, target, crate::wobble::N);
+                    let pts = pts.into_iter().map(|(x, y)| (((x as f64 - view.origin.x as f64) * view.scale) as f32, ((y as f64 - view.origin.y as f64) * view.scale) as f32)).collect();
+                    warp = Some((pts, a));
+                    alpha = 1.0;
+                    zoom = 1.0;
+                }
                 // minimizing: fade and shrink towards the task bar button (or the bottom middle)
                 let mut shift = (0.0f64, 0.0f64);
-                if let Some(p) = self.minimize_progress(window) {
+                if let (Some(p), true) = (self.minimize_progress(window), warp.is_none()) {
                     let target = self
                         .minimize_target(window)
                         .map(|t| (t.loc.x as f64 + t.size.w as f64 / 2.0, t.loc.y as f64 + t.size.h as f64 / 2.0))
@@ -384,13 +408,13 @@ impl Fde {
                     .wobbles
                     .iter()
                     .find(|(w, _)| w == window)
-                    .filter(|(_, b)| b.displacement() > 0.4)
+                    .filter(|(_, b)| b.displacement() > 0.4 && warp.is_none())
                     .map(|(_, b)| b.clone());
                 // a window that was asked to close is also drawn through a texture, so that its last
                 // picture can fade out when it is gone
                 let snap = self.close_requested(window);
                 let wm = sc(24, view.scale);
-                let mut tmp: Option<GlesTexture> = if wob.is_some() || snap {
+                let mut tmp: Option<GlesTexture> = if wob.is_some() || snap || warp.is_some() {
                     Some(create_scene(renderer, (outer_p.size.w + 2 * wm, outer_p.size.h + 2 * wm).into())?)
                 } else {
                     None
@@ -493,7 +517,7 @@ impl Fde {
                 drop(target);
 
                 // closing: draw the window from its texture and keep the texture
-                if let (Some(tex), None) = (&tmp, &wob) {
+                if let (Some(tex), None, None) = (&tmp, &wob, &warp) {
                     let dest = Rectangle::<i32, Physical>::new((outer_p.loc.x - wm, outer_p.loc.y - wm).into(), (tex.size().w, tex.size().h).into());
                     let src = Rectangle::<f64, BufferCoord>::from_size((tex.size().w as f64, tex.size().h as f64).into());
                     let mut target = renderer.bind(scene)?;
@@ -528,29 +552,60 @@ impl Fde {
                     glass.mesh.draw(&mut frame, tex, (size.w, size.h), &points, n)?;
                     let _ = frame.finish()?;
                 }
+                // the poured window
+                if let (Some(tex), Some((points, a))) = (&tmp, &warp) {
+                    let mut target = renderer.bind(scene)?;
+                    let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+                    glass.mesh.draw_part(&mut frame, tex, (size.w, size.h), points, crate::wobble::N, *a, (0.0, 0.0, 1.0, 1.0))?;
+                    let _ = frame.finish()?;
+                }
             }
             let _ = WindowSurfaceType::ALL;
 
-            // windows that have just closed fade out
-            let ghosts: Vec<(crate::state::Snapshot, f32)> =
-                self.ghosts.iter().map(|g| (g.snapshot.clone(), g.since.elapsed().as_secs_f32() / crate::windows::CLOSE_SECONDS)).collect();
-            for (g, t) in ghosts {
+            // windows that have just closed go away (fade, fold up or shatter)
+            let ghosts: Vec<(crate::state::Snapshot, f32, crate::effects::CloseEffect)> = self
+                .ghosts
+                .iter()
+                .map(|g| (g.snapshot.clone(), g.since.elapsed().as_secs_f32() / g.effect.seconds(), g.effect))
+                .collect();
+            for (g, t, effect) in ghosts {
                 if t >= 1.0 || (g.scale - view.scale).abs() > 1e-6 || g.rect.intersection(out_rect).is_none() {
                     continue;
                 }
-                let e = crate::windows::ease_out(t);
-                let (alpha, zoom) = (1.0 - e, 1.0 - 0.06 * e as f64);
                 let full_rect = view.rect(g.rect);
-                let (w, h) = ((full_rect.size.w as f64 * zoom).round() as i32, (full_rect.size.h as f64 * zoom).round() as i32);
-                let dest = Rectangle::<i32, Physical>::new(
-                    (full_rect.loc.x + (full_rect.size.w - w) / 2, full_rect.loc.y + (full_rect.size.h - h) / 2).into(),
-                    (w, h).into(),
-                );
-                let src = Rectangle::<f64, BufferCoord>::from_size((g.texture.size().w as f64, g.texture.size().h as f64).into());
-                let mut target = renderer.bind(scene)?;
-                let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
-                frame.render_texture_from_to(&g.texture, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, alpha, None, &[])?;
-                let _ = frame.finish()?;
+                let tex_rect = (full_rect.loc.x as f64, full_rect.loc.y as f64, full_rect.size.w as f64, full_rect.size.h as f64);
+                match effect {
+                    crate::effects::CloseEffect::Fade => {
+                        let e = crate::windows::ease_out(t);
+                        let (alpha, zoom) = (1.0 - e, 1.0 - 0.06 * e as f64);
+                        let (w, h) = ((full_rect.size.w as f64 * zoom).round() as i32, (full_rect.size.h as f64 * zoom).round() as i32);
+                        let dest = Rectangle::<i32, Physical>::new(
+                            (full_rect.loc.x + (full_rect.size.w - w) / 2, full_rect.loc.y + (full_rect.size.h - h) / 2).into(),
+                            (w, h).into(),
+                        );
+                        let src = Rectangle::<f64, BufferCoord>::from_size((g.texture.size().w as f64, g.texture.size().h as f64).into());
+                        let mut target = renderer.bind(scene)?;
+                        let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+                        frame.render_texture_from_to(&g.texture, src, dest, &[Rectangle::from_size(dest.size)], &[], Transform::Normal, alpha, None, &[])?;
+                        let _ = frame.finish()?;
+                    }
+                    crate::effects::CloseEffect::Fold => {
+                        let (points, a) = crate::effects::fold(t as f64, tex_rect, crate::wobble::N);
+                        let mut target = renderer.bind(scene)?;
+                        let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+                        glass.mesh.draw_part(&mut frame, &g.texture, (size.w, size.h), &points, crate::wobble::N, a, (0.0, 0.0, 1.0, 1.0))?;
+                        let _ = frame.finish()?;
+                    }
+                    crate::effects::CloseEffect::Shatter => {
+                        let pieces = crate::effects::shatter(t as f64, tex_rect, 9, 6);
+                        let mut target = renderer.bind(scene)?;
+                        let mut frame = renderer.render(&mut target, size, Transform::Normal)?;
+                        for piece in pieces.iter().filter(|p| p.alpha > 0.003) {
+                            glass.mesh.draw_part(&mut frame, &g.texture, (size.w, size.h), &piece.corners, 2, piece.alpha, piece.uv)?;
+                        }
+                        let _ = frame.finish()?;
+                    }
+                }
             }
 
             // panels, launchers, notifications above the windows
@@ -861,4 +916,9 @@ impl Fde {
         let _ = frame.finish()?;
         Ok(())
     }
+}
+
+/// Does this window's opening come out of its task bar button?
+fn info_from_bar(window: &smithay::desktop::Window) -> bool {
+    crate::windows::info(window).lock().unwrap().from_bar
 }
