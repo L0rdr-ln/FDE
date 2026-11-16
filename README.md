@@ -1,23 +1,15 @@
 <div align="center">
 
-# FDE
+<img src="assets/title.svg" alt="FDE" width="380">
 
-<br>
-
-A glass-style Wayland desktop environment.
-
-<br>
+**A Wayland desktop with real glass.**
 
 [![build](https://github.com/L0rdr-ln/FDE/actions/workflows/build.yml/badge.svg)](https://github.com/L0rdr-ln/FDE/actions/workflows/build.yml)
 [![license](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![release](https://img.shields.io/github/v/release/L0rdr-ln/FDE?include_prereleases)](https://github.com/L0rdr-ln/FDE/releases)
 ![Rust](https://img.shields.io/badge/rust-stable-orange?logo=rust)
 
-<br>
-
 [Try it](#try-it) | [Features](#features) | [Keys](#keys) | [Configuration](#configuration) | [Build](#build) | [Roadmap](docs/ROADMAP.md)
-
-<br>
 
 <img src="docs/shell.png" alt="FDE with a Qt editor and an X11 terminal in glass frames, the task bar with its window list, network status and workspaces">
 
