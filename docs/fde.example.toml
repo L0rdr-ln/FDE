@@ -38,7 +38,8 @@ repeat_delay = 600
 
 [shell]
 polkit_agent = true    # start a graphical password prompt for programs that need admin rights (if one is installed)
-remember_windows = true # open each program's window where it was last closed (~/.local/state/fde/windows)
+remember_windows = true  # open each program's window where it was last closed (~/.local/state/fde/windows)
+tiling_default = false   # every workspace starts in tiling mode (Alt+T switches one off or on)
 pinned = []           # programs with a button on the task bar even when not running: desktop file names, e.g. ["firefox", "org.gnome.Nautilus"] (or right-click a window's title bar: Pin to task bar)
 terminal = "foot"
 launcher = ""          # what the start orb runs when no applications are found

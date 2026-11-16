@@ -4409,6 +4409,175 @@ fn alt_t_tiles_the_windows_side_by_side_and_again_puts_them_back() {
 }
 
 #[test]
+fn tiling_mode_keeps_the_workspace_laid_out_as_windows_come_and_go() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (1000, 700).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-tiling").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    for (w, h) in [(300, 200), (250, 180), (200, 150)] {
+        open_window(&mut hn, dir.path(), "fde-e2e-tiling", w, h);
+    }
+    let windows: Vec<_> = hn.state.space.elements().cloned().collect();
+    let before: Vec<_> = windows.iter().map(|w| hn.state.space.element_geometry(w).unwrap().loc).collect();
+    // where the layout put a window and the size it asked for
+    let cell = |hn: &Harness, w: &smithay::desktop::Window| -> Rectangle<i32, smithay::utils::Logical> {
+        let loc = hn.state.space.element_location(w).unwrap();
+        let size = w.toplevel().unwrap().with_pending_state(|s| s.size).unwrap();
+        Rectangle::new(loc, size)
+    };
+    assert!(!hn.state.tiling_on());
+    hn.state.toggle_tiling();
+    assert!(hn.state.tiling_on());
+
+    // master and stack: the front window is the master on the left, the others share the right
+    let front = windows[2].clone();
+    let (m, a, b) = (cell(&hn, &front), cell(&hn, &windows[1]), cell(&hn, &windows[0]));
+    assert!(m.loc.x < a.loc.x && a.loc.x == b.loc.x && a.loc.y < b.loc.y, "master left, stack right: {m:?} {a:?} {b:?}");
+    assert!(m.size.h > a.size.h, "the master is as tall as the area");
+
+    // a new window is the master, the others move over
+    open_window(&mut hn, dir.path(), "fde-e2e-tiling", 220, 160);
+    hn.state.retile();
+    let newest = hn.state.space.elements().last().cloned().unwrap();
+    assert_ne!(newest, front);
+    assert_eq!(hn.state.tiled_now()[0], newest, "the new window took the master place");
+    assert!(cell(&hn, &newest).loc.x < cell(&hn, &front).loc.x, "the old master went to the stack");
+
+    // a window that leaves: the others fill its place
+    let leaving = windows[0].clone();
+    let count = hn.state.tiled_now().len();
+    hn.state.space.unmap_elem(&leaving);
+    hn.state.retile();
+    assert_eq!(hn.state.tiled_now().len(), count - 1);
+    let heights: Vec<i32> = hn.state.tiled_now().iter().skip(1).map(|w| cell(&hn, w).size.h).collect();
+    assert!(heights.windows(2).all(|p| p[0] == p[1]), "the stack shares the height equally: {heights:?}");
+    hn.state.space.map_element(leaving.clone(), smithay::utils::Point::<i32, smithay::utils::Logical>::from((50, 50)), false);
+    hn.state.retile();
+    assert_eq!(hn.state.tiled_now().len(), count);
+
+    // promote: the focused window becomes the master; swap: it moves one place
+    let order = hn.state.tiled_now();
+    hn.state.focus_window(&order[2]);
+    hn.state.tile_promote();
+    hn.state.retile();
+    let promoted = hn.state.tiled_now();
+    assert_eq!(promoted[0], order[2], "the focused window is the master now");
+    assert_eq!(promoted[1], order[1], "the others moved down in order");
+    hn.state.tile_swap(1);
+    hn.state.retile();
+    let swapped = hn.state.tiled_now();
+    assert_eq!((swapped[0].clone(), swapped[1].clone()), (promoted[1].clone(), promoted[0].clone()), "swapped with the next");
+
+    // J and K walk the windows
+    let first = hn.state.tiled_now()[0].clone();
+    hn.state.focus_window(&first);
+    hn.state.tile_focus(1);
+    assert_eq!(hn.state.space.elements().last().cloned().unwrap(), hn.state.tiled_now()[1]);
+    hn.state.tile_focus(-1);
+    hn.state.tile_focus(-1);
+    assert_eq!(hn.state.space.elements().last().cloned().unwrap(), *hn.state.tiled_now().last().unwrap(), "it wraps round");
+
+    // the master column wider and narrower, more masters
+    let master = hn.state.tiled_now()[0].clone();
+    let w0 = cell(&hn, &master).size.w;
+    hn.state.tile_ratio(0.1);
+    hn.state.retile();
+    assert!(cell(&hn, &master).size.w > w0 + 50, "wider");
+    hn.state.tile_ratio(-0.2);
+    hn.state.retile();
+    assert!(cell(&hn, &master).size.w < w0 - 50, "narrower");
+    hn.state.tile_masters(1);
+    hn.state.retile();
+    let two_masters: Vec<_> = hn.state.tiled_now().iter().take(2).map(|w| cell(&hn, w)).collect();
+    assert!(two_masters[0].loc.x == two_masters[1].loc.x && two_masters[0].size.h < 400, "two windows share the master column");
+    hn.state.tile_masters(-1);
+
+    // layouts: grid (no overlaps), monocle (all the same), and round again
+    hn.state.tile_next_layout();
+    hn.state.retile();
+    let grid: Vec<_> = hn.state.tiled_now().iter().map(|w| cell(&hn, w)).collect();
+    assert!(grid.iter().enumerate().all(|(i, c)| grid[i + 1..].iter().all(|d| !c.overlaps(*d))), "the grid does not overlap");
+    hn.state.tile_next_layout();
+    hn.state.retile();
+    let mono: Vec<_> = hn.state.tiled_now().iter().map(|w| cell(&hn, w)).collect();
+    assert!(mono.iter().all(|c| *c == mono[0]), "monocle: every window as big as the area");
+    hn.state.tile_next_layout();
+    hn.state.retile();
+    assert_eq!(hn.state.tiling.get(&0).unwrap().layout, fde::tiling::Layout::MasterStack);
+
+    // floating: a window leaves the layout and the others fill its place; again: it is tiled
+    let top = hn.state.space.elements().last().cloned().unwrap();
+    let count = hn.state.tiled_now().len();
+    hn.state.tile_toggle_float();
+    hn.state.retile();
+    assert!(!hn.state.tiled_now().contains(&top), "it floats");
+    assert_eq!(hn.state.tiled_now().len(), count - 1);
+    hn.state.tile_toggle_float();
+    hn.state.retile();
+    assert!(hn.state.tiled_now().contains(&top), "tiled again");
+
+    // dropping a dragged window onto another one swaps them
+    let order = hn.state.tiled_now();
+    let target = cell(&hn, &order[1]);
+    hn.state.pointer_location = ((target.loc.x + target.size.w / 2) as f64, (target.loc.y + target.size.h / 2) as f64).into();
+    hn.state.tile_drop(&order[0]);
+    hn.state.retile();
+    assert_eq!(hn.state.tiled_now()[0], order[1]);
+    assert_eq!(hn.state.tiled_now()[1], order[0]);
+
+    // leaving the mode puts the windows that were there back
+    hn.state.toggle_tiling();
+    assert!(!hn.state.tiling_on());
+    hn.state.retile();
+    for (i, w) in windows.iter().enumerate().skip(1) {
+        assert_eq!(hn.state.space.element_geometry(w).unwrap().loc, before[i], "window {i} is back where it was");
+    }
+    // and nothing is moved any more
+    let at = hn.state.space.element_location(&newest).unwrap();
+    hn.state.retile();
+    assert_eq!(hn.state.space.element_location(&newest).unwrap(), at);
+}
+
+#[test]
+fn dialogs_and_windows_of_a_fixed_size_stay_out_of_the_layout() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (1000, 700).into());
+    state.config.appearance.animations = false;
+    let socket = ListeningSocket::bind("fde-e2e-tilefloat").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    for _ in 0..2 {
+        open_window(&mut hn, dir.path(), "fde-e2e-tilefloat", 300, 200);
+    }
+    hn.state.toggle_tiling();
+    assert_eq!(hn.state.tiled_now().len(), 2);
+    // a window that is maximized by hand leaves the layout until it is restored
+    let top = hn.state.space.elements().last().cloned().unwrap();
+    hn.state.set_maximized(&top, true);
+    hn.state.retile();
+    assert_eq!(hn.state.tiled_now().len(), 1);
+    hn.state.set_maximized(&top, false);
+    hn.state.retile();
+    assert_eq!(hn.state.tiled_now().len(), 2);
+    // with the mode off a workspace is never touched; workspaces are independent
+    hn.state.switch_workspace(1);
+    assert!(!hn.state.tiling_on(), "another workspace is not tiling");
+    hn.state.switch_workspace(0);
+    assert!(hn.state.tiling_on());
+    // a workspace set to tile from the start
+    hn.state.config.shell.tiling_default = true;
+    hn.state.switch_workspace(2);
+    hn.state.retile();
+    assert!(hn.state.tiling_on(), "tiling_default turns it on for a workspace not set before");
+}
+
+#[test]
 fn with_two_keyboard_layouts_the_next_one_is_a_key_or_a_signal_away() {
     let dir = tempfile::tempdir().unwrap();
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

@@ -86,6 +86,11 @@ pub fn shell(terminal: &str, launcher: &str, panel: bool, remember_windows: bool
     ]
 }
 
+/// Every workspace starts in tiling mode (Alt+T still switches one off).
+pub fn tiling(on: bool) -> Vec<(&'static str, Setting)> {
+    vec![("shell.tiling_default", Setting::Bool(on))]
+}
+
 pub fn wallpaper(path: &str, mode: &str) -> Vec<(&'static str, Setting)> {
     vec![("wallpaper.path", Setting::Str(path.trim().to_string())), ("wallpaper.mode", Setting::Str(mode.to_string()))]
 }
@@ -249,5 +254,10 @@ mod tests {
         let changes = effects("lamp", "fold", "unfold", "cube", "flip3d");
         let keys: Vec<&str> = changes.iter().map(|c| c.0).collect();
         assert_eq!(keys, ["appearance.minimize_effect", "appearance.close_effect", "appearance.open_effect", "appearance.workspace_effect", "appearance.switcher_effect"]);
+    }
+
+    #[test]
+    fn tiling_by_default_is_a_shell_setting() {
+        assert_eq!(tiling(true), vec![("shell.tiling_default", Setting::Bool(true))]);
     }
 }

@@ -162,11 +162,13 @@ pub struct Shell {
     pub remember_windows: bool,
     /// programs that keep a button on the task bar (their desktop file names without `.desktop`)
     pub pinned: Vec<String>,
+    /// every workspace starts in tiling mode (Alt+T still switches one off)
+    pub tiling_default: bool,
 }
 
 impl Default for Shell {
     fn default() -> Self {
-        Shell { terminal: "foot".into(), launcher: String::new(), panel: true, autostart: Vec::new(), polkit_agent: true, remember_windows: true, pinned: Vec::new() }
+        Shell { terminal: "foot".into(), launcher: String::new(), panel: true, autostart: Vec::new(), polkit_agent: true, remember_windows: true, pinned: Vec::new(), tiling_default: false }
     }
 }
 

@@ -79,7 +79,12 @@ issue. See [docs/HARDWARE.md](docs/HARDWARE.md).
 | **Super+Tab** | Overview of all windows |
 | **Alt+drag** | Move a window |
 | **Alt+Left / Right** | Snap to half the screen |
-| **Alt+T** | Tile windows |
+| **Alt+T** | Tiling mode for this workspace (windows stay laid out; again: leave it) |
+| **Alt+J / K** | Tiling: focus next / previous window (with Shift: move it) |
+| **Alt+Z** | Tiling: make the window the master |
+| **Alt+Shift+arrows** | Tiling: master area narrower / wider, more / fewer masters |
+| **Alt+Y** | Tiling: next layout (master and stack, grid, monocle) |
+| **Alt+Shift+F** | Float the window, or tile it again |
 | **Alt+1 … 9** | Switch workspace |
 | **Alt+q** | Close window |
 | **Alt+L** | Lock |

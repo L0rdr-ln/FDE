@@ -405,6 +405,10 @@ impl Fde {
             return; // no picture yet
         }
         info(window).lock().unwrap().fitted = true;
+        // the layout places tiled windows
+        if self.tiling_on() && self.tileable(window) {
+            return;
+        }
         if self.is_maximized(window) || self.is_fullscreen(window) || self.is_override_redirect(window) {
             return;
         }
@@ -625,6 +629,7 @@ impl Fde {
 
     pub fn tick_animations(&mut self) {
         self.ghosts.retain(|g| g.since.elapsed().as_secs_f32() < g.effect.seconds());
+        self.retile();
         self.tick_expo();
         self.ripples.retain(|(_, t)| t.elapsed().as_secs_f32() < crate::effects::RIPPLE_SECONDS);
         if self.cube.as_ref().is_some_and(|c| c.since.elapsed().as_secs_f32() >= crate::effects::CUBE_SECONDS) {

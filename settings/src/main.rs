@@ -523,6 +523,12 @@ fn shell_page(cfg: &Config, status: &Status) -> GBox {
     body.append(&row("Task bar", &panel));
     body.append(&row("Open windows where they were", &remember));
     body.append(&row("Pinned to the task bar", &pinned));
+    let tile = gtk4::Switch::new();
+    tile.set_active(cfg.shell.tiling_default);
+    tile.set_halign(Align::Start);
+    let st7 = status.clone();
+    tile.connect_active_notify(move |sw| st7.report(config::set(&path(), &model::tiling(sw.is_active()))));
+    body.append(&row("Tile windows on every workspace (Alt+T switches one)", &tile));
     let note = Label::new(Some("The task bar starts and stops with the next session."));
     note.add_css_class("hint");
     note.set_halign(Align::Start);

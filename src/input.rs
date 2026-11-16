@@ -30,6 +30,13 @@ enum Action {
     ToggleDnd,
     ToggleHelp,
     ToggleExpo,
+    TileFocus(i32),
+    TileSwap(i32),
+    TilePromote,
+    TileRatio(f64),
+    TileMasters(i32),
+    TileLayout,
+    TileFloat,
     WindowMenu,
     Tile,
     NextLayout,
@@ -67,7 +74,14 @@ pub const SHORTCUTS: &[(&str, &str)] = &[
     ("Volume, brightness, media keys", "as on a laptop (brightness needs brightnessctl or logind)"),
     ("Windows key", "open the start menu"),
     ("Windows+Space", "next keyboard layout (input.keyboard_layout = \"us,de\")"),
-    ("Alt+T", "tile the windows side by side (again: put them back)"),
+    ("Alt+T", "tiling mode for this workspace (again: leave it)"),
+    ("Alt+J / K", "tiling: focus the next / previous window"),
+    ("Alt+Shift+J / K", "tiling: move the window down / up the order"),
+    ("Alt+Z", "tiling: make the window the master"),
+    ("Alt+Shift+Left / Right", "tiling: master area narrower / wider"),
+    ("Alt+Shift+Up / Down", "tiling: more / fewer master windows"),
+    ("Alt+Y", "tiling: next layout (master and stack, grid, monocle)"),
+    ("Alt+Shift+F", "float the window, or tile it again"),
     ("Alt+Space", "the window menu (or right-click a title bar)"),
     ("Alt+L", "lock the screen"),
     ("Alt+N", "do not disturb on or off"),
@@ -196,6 +210,36 @@ impl Fde {
                                     keysyms::KEY_Left => return FilterResult::Intercept(Action::WorkspaceStep(-1)),
                                     keysyms::KEY_Right => return FilterResult::Intercept(Action::WorkspaceStep(1)),
                                     _ => {}
+                                }
+                            }
+                            // tiling: J and K walk the windows (with Shift they move one), Z makes
+                            // the master, Y changes the layout, Shift+F floats; in tiling mode
+                            // Shift+arrows change the master area
+                            let sym = handle.modified_sym().raw();
+                            if !mods.ctrl {
+                                let tiling = if mods.shift && state.tiling_on() {
+                                    match sym {
+                                        keysyms::KEY_Left => Some(Action::TileRatio(-0.05)),
+                                        keysyms::KEY_Right => Some(Action::TileRatio(0.05)),
+                                        keysyms::KEY_Up => Some(Action::TileMasters(1)),
+                                        keysyms::KEY_Down => Some(Action::TileMasters(-1)),
+                                        _ => None,
+                                    }
+                                } else {
+                                    None
+                                };
+                                let tiling = tiling.or(match sym {
+                                    keysyms::KEY_j => Some(Action::TileFocus(1)),
+                                    keysyms::KEY_k => Some(Action::TileFocus(-1)),
+                                    keysyms::KEY_J => Some(Action::TileSwap(1)),
+                                    keysyms::KEY_K => Some(Action::TileSwap(-1)),
+                                    keysyms::KEY_z | keysyms::KEY_Z => Some(Action::TilePromote),
+                                    keysyms::KEY_y | keysyms::KEY_Y => Some(Action::TileLayout),
+                                    keysyms::KEY_F if mods.shift => Some(Action::TileFloat),
+                                    _ => None,
+                                });
+                                if let Some(a) = tiling {
+                                    return FilterResult::Intercept(a);
                                 }
                             }
                             let action = match handle.modified_sym().raw() {
@@ -329,6 +373,13 @@ impl Fde {
             Action::ToggleDnd => self.toggle_do_not_disturb(),
             Action::ToggleHelp => self.help_open = !self.help_open,
             Action::ToggleExpo => self.toggle_expo(),
+            Action::TileFocus(d) => self.tile_focus(d),
+            Action::TileSwap(d) => self.tile_swap(d),
+            Action::TilePromote => self.tile_promote(),
+            Action::TileRatio(d) => self.tile_ratio(d),
+            Action::TileMasters(d) => self.tile_masters(d),
+            Action::TileLayout => self.tile_next_layout(),
+            Action::TileFloat => self.tile_toggle_float(),
             Action::WindowMenu => {
                 if let Some(w) = self.space.elements().last().cloned() {
                     let at = self.outer_of(&w).map(|o| (o.loc.x as f64 + 8.0, o.loc.y as f64 + 8.0).into()).unwrap_or(self.pointer_location);
@@ -539,8 +590,11 @@ impl Fde {
         } else if !pressed {
             if let Some(drag) = self.drag.take() {
                 self.release_wobbles();
-                if let Drag::Move { window, .. } = drag {
-                    self.snap_if_at_edge(&window);
+                match &drag {
+                    // a tiled window is not snapped to an edge: it changes places or goes back
+                    Drag::Move { window, .. } if self.is_tiled(window) => self.tile_drop(window),
+                    Drag::Move { window, .. } => self.snap_if_at_edge(window),
+                    Drag::Resize { window, .. } => self.tile_after_resize(window),
                 }
                 // a drag the program asked for began inside its press: it gets the release, which
                 // also ends that press's hold on the pointer

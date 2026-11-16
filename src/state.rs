@@ -46,6 +46,8 @@ pub struct Ghost {
 /// Per-window state kept in the window's user data.
 #[derive(Debug, Default, Clone)]
 pub struct WinInfo {
+    /// the user took it out of the tiling layout (Alt+Shift+F)
+    pub floating: bool,
     /// where the window was before it was maximized
     pub restore: Option<Rectangle<i32, Logical>>,
     /// where the window was before it was snapped to half the screen
@@ -171,6 +173,12 @@ pub struct Fde {
     /// the open menu of a program that holds the keyboard and pointer
     pub popup_grab: Option<smithay::desktop::PopupGrab<Fde>>,
     /// what the last Alt+T tiled, and where each window was (and whether it was maximized) before
+    /// workspaces in tiling mode (by number), and what each is set to
+    pub tiling: std::collections::HashMap<usize, crate::tiling::TileState>,
+    /// the order of the windows in the layouts (the first is the master)
+    pub tile_order: Vec<Window>,
+    /// what the layout last placed, per workspace (so that it only acts when something changed)
+    pub tile_applied: std::collections::HashMap<usize, Vec<(Window, Rectangle<i32, Logical>)>>,
     pub tiled_before: Option<Vec<(Window, Rectangle<i32, Logical>, bool, Option<Rectangle<i32, Logical>>)>>,
     /// where each program's window was last closed
     pub placements: crate::placement::Placements,
@@ -408,6 +416,9 @@ impl Fde {
             dnd_icon: None,
             xfocus: None,
             popup_grab: None,
+            tiling: std::collections::HashMap::new(),
+            tile_order: Vec::new(),
+            tile_applied: std::collections::HashMap::new(),
             tiled_before: None,
             placements: crate::placement::load(),
             swallow_release: false,
