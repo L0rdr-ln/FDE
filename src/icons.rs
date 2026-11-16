@@ -107,7 +107,14 @@ pub fn load(path: &Path, px: i32) -> Option<Icon> {
     }
 }
 
+/// Icons larger than this are not icons: refused before they are read into memory.
+const MAX_ICON_SIDE: u32 = 2048;
+const MAX_SVG_BYTES: u64 = 4 << 20;
+
 fn load_svg(path: &Path, px: i32) -> Option<Icon> {
+    if std::fs::metadata(path).ok()?.len() > MAX_SVG_BYTES {
+        return None;
+    }
     let data = std::fs::read(path).ok()?;
     let tree = resvg::usvg::Tree::from_data(&data, &resvg::usvg::Options::default()).ok()?;
     let mut pixmap = resvg::tiny_skia::Pixmap::new(px as u32, px as u32)?;
@@ -122,6 +129,9 @@ fn load_png(path: &Path, px: i32) -> Option<Icon> {
     let mut decoder = png::Decoder::new(std::io::BufReader::new(std::fs::File::open(path).ok()?));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().ok()?;
+    if reader.info().width > MAX_ICON_SIDE || reader.info().height > MAX_ICON_SIDE {
+        return None;
+    }
     let mut buf = vec![0u8; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).ok()?;
     let (w, h) = (info.width as usize, info.height as usize);

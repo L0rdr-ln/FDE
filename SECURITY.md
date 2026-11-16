@@ -27,7 +27,8 @@ FDE keeps that away from ordinary programs.
 other end of each connection (SO_PEERCRED), so a program cannot claim to be another one by name.
 The path the kernel reports is believed only if it names, on the real file system, the very file
 the process runs (same device and inode): a program in a sandbox or a mount namespace of its own
-cannot dress itself up as `/usr/bin/grim`.
+cannot dress itself up as `/usr/bin/grim`. On Linux 6.5 and later the compositor also holds a
+handle on the connecting process while it looks, so a recycled process number cannot be mistaken for it.
 
 ```toml
 [security]
@@ -58,7 +59,8 @@ restrict = true                                          # false: every program 
 
 X11 has no protection between programs: under XWayland any X11 program can see the others' windows
 and keys. FDE limits what reaches X11: X11 programs can read the clipboard only while an X11 window
-has the keyboard, and they never get screen capture of Wayland windows.
+has the keyboard, and they never get screen capture of Wayland windows. Other users of the same
+computer cannot connect to your XWayland (checked with a second account).
 
 ### Small things
 
@@ -67,6 +69,8 @@ has the keyboard, and they never get screen capture of Wayland windows.
 - State files (`outputs.toml`, `workspace`, `dnd`) live in `$XDG_RUNTIME_DIR`, which only you can read.
 - Notifications are cut to a size a bubble can show (any program on the session bus may send them),
   so a program cannot fill the history or memory with one huge message.
+- Pictures that claim absurd sizes (wallpapers over 150 million pixels, icons over 2048 pixels a
+  side, SVG icons over 4 MB) are refused before memory is set aside for them.
 - A window's own name can choose an icon from the icon themes, never a picture file by path.
 - A Wi-Fi network's name is never read as a command option when you connect to it.
 - The configuration is written by the settings app to a temporary file and moved into place, and
@@ -84,6 +88,13 @@ has the keyboard, and they never get screen capture of Wayland windows.
   it gets no typing unless you click it, but it could still draw something that looks like a
   password prompt. Alt+Tab, Alt+L and console switching always work.
 - **Full-screen windows** can cover everything, as on any desktop.
+
+## Dependencies
+
+`cargo audit` reports no known vulnerabilities (November 2026). It does warn about libraries FDE
+gets through others and that are no longer maintained: `cgmath` (through Smithay; the one unsound
+function in it, `swap_columns`, is not used), `ttf-parser` (through the text and SVG libraries) and
+`zvariant` / `zbus_names` (through the D-Bus library).
 
 ## Reporting a problem
 

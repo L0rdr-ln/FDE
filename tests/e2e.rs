@@ -4965,7 +4965,13 @@ fn a_pinned_program_has_a_button_that_starts_it_and_its_windows_share_that_butto
     };
 
     // pinned, not running: a button with an icon (a letter) but no tile
-    let (t0, _) = look(&mut hn, &mut renderer, &glass, &mut scene);
+    // (the bar may still be drawing itself: look until the picture has settled, not once)
+    let since = Instant::now();
+    let mut t0 = look(&mut hn, &mut renderer, &glass, &mut scene).0;
+    while t0 >= 12 && since.elapsed() < Duration::from_secs(10) {
+        hn.pump_for(100);
+        t0 = look(&mut hn, &mut renderer, &glass, &mut scene).0;
+    }
     assert!(t0 < 12, "a pinned program that is not running has no tile: {t0}");
     // a click starts it
     assert!(!marker.exists());

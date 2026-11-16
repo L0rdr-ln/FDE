@@ -132,6 +132,20 @@ pub struct Image {
 }
 
 /// Read a PNG, JPEG or WebP file (found out from the first bytes, not the name) as RGBA.
+/// The most pixels a wallpaper may have (a 16K screen has 133 million): a file that claims more
+/// is refused before any memory is set aside for it.
+pub const MAX_PIXELS: u64 = 150_000_000;
+
+fn check_size(w: u64, h: u64) -> Result<(), String> {
+    if w == 0 || h == 0 {
+        return Err("empty picture".into());
+    }
+    if w.saturating_mul(h) > MAX_PIXELS {
+        return Err(format!("the picture is too large ({w} x {h})"));
+    }
+    Ok(())
+}
+
 pub fn load_image(path: &std::path::Path) -> Result<Image, String> {
     let head = {
         use std::io::Read;
@@ -158,6 +172,7 @@ pub fn load_webp(path: &std::path::Path) -> Result<Image, String> {
 fn decode_webp<R: std::io::BufRead + std::io::Seek>(reader: R) -> Result<Image, String> {
     let mut dec = image_webp::WebPDecoder::new(reader).map_err(|e| e.to_string())?;
     let (w, h) = dec.dimensions();
+    check_size(w as u64, h as u64)?;
     let has_alpha = dec.has_alpha();
     let size = dec.output_buffer_size().ok_or("picture too large")?;
     let mut data = vec![0u8; size];
@@ -267,8 +282,10 @@ pub fn for_config(config: &crate::config::Config) -> Option<Image> {
 pub fn load_jpeg(path: &std::path::Path) -> Result<Image, String> {
     let file = std::fs::File::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut dec = jpeg_decoder::Decoder::new(std::io::BufReader::new(file));
-    let data = dec.decode().map_err(|e| format!("{}: {e}", path.display()))?;
+    dec.read_info().map_err(|e| format!("{}: {e}", path.display()))?;
     let info = dec.info().ok_or_else(|| format!("{}: no picture information", path.display()))?;
+    check_size(info.width as u64, info.height as u64).map_err(|e| format!("{}: {e}", path.display()))?;
+    let data = dec.decode().map_err(|e| format!("{}: {e}", path.display()))?;
     let (w, h) = (info.width as i32, info.height as i32);
     let rgba: Vec<u8> = match info.pixel_format {
         jpeg_decoder::PixelFormat::RGB24 => data.chunks_exact(3).flat_map(|p| [p[0], p[1], p[2], 255]).collect(),
@@ -287,6 +304,7 @@ pub fn load_png(path: &std::path::Path) -> Result<Image, String> {
     let mut decoder = png::Decoder::new(std::io::BufReader::new(file));
     decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
     let mut reader = decoder.read_info().map_err(|e| format!("{}: {e}", path.display()))?;
+    check_size(reader.info().width as u64, reader.info().height as u64).map_err(|e| format!("{}: {e}", path.display()))?;
     let mut buf = vec![0; reader.output_buffer_size()];
     let info = reader.next_frame(&mut buf).map_err(|e| format!("{}: {e}", path.display()))?;
     let (w, h) = (info.width as i32, info.height as i32);
@@ -459,5 +477,13 @@ mod tests {
         assert_eq!((img.width, img.height), (2, 1));
         assert_eq!(img.rgba, vec![10, 20, 30, 255, 40, 50, 60, 255]);
         assert!(load_png(&dir.path().join("missing.png")).is_err());
+    }
+
+    #[test]
+    fn a_picture_that_claims_to_be_enormous_is_refused() {
+        assert!(check_size(7680, 4320).is_ok());
+        assert!(check_size(0, 100).is_err());
+        assert!(check_size(100_000, 100_000).is_err());
+        assert!(check_size(u32::MAX as u64, u32::MAX as u64).is_err());
     }
 }

@@ -51,9 +51,36 @@ fn peer_pid(stream: &std::os::unix::net::UnixStream) -> Option<i32> {
     (r == 0 && cred.pid > 0).then_some(cred.pid)
 }
 
+/// A handle on the process on the other end (SO_PEERPIDFD, Linux 6.5 and later): unlike its
+/// number, it cannot come to mean another process.
+fn peer_pidfd(stream: &std::os::unix::net::UnixStream) -> Option<std::os::fd::OwnedFd> {
+    use std::os::fd::{AsRawFd, FromRawFd};
+    const SO_PEERPIDFD: libc::c_int = 77;
+    let mut fd: libc::c_int = -1;
+    let mut len = std::mem::size_of::<libc::c_int>() as libc::socklen_t;
+    let r = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, SO_PEERPIDFD, &mut fd as *mut _ as *mut libc::c_void, &mut len) };
+    (r == 0 && fd >= 0).then(|| unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) })
+}
+
+/// Is the process behind this handle still running? (A pidfd becomes readable when it ends.)
+fn still_running(pidfd: &std::os::fd::OwnedFd) -> bool {
+    use std::os::fd::AsRawFd;
+    let mut p = libc::pollfd { fd: pidfd.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+    unsafe { libc::poll(&mut p, 1, 0) == 0 }
+}
+
 /// The program on the other end of a client connection.
+///
+/// A process number can be given to a new process once the old one has ended, so where the
+/// kernel can hand out a handle on the process itself, the answer counts only if that process
+/// is still running after its program was looked up: then the number meant it all along.
 pub fn peer_executable(stream: &std::os::unix::net::UnixStream) -> Option<PathBuf> {
-    verified_executable(peer_pid(stream)?)
+    let handle = peer_pidfd(stream);
+    let exe = verified_executable(peer_pid(stream)?)?;
+    match handle {
+        Some(h) if !still_running(&h) => None,
+        _ => Some(exe),
+    }
 }
 
 /// The program file process `pid` runs, as a path that means the same file *here*.
@@ -173,5 +200,54 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
         assert!(seen.is_none(), "the path now names a different file: {seen:?}");
+    }
+
+    #[test]
+    fn the_program_on_the_other_end_of_a_connection_is_found_and_a_dead_one_is_not() {
+        let (a, b) = std::os::unix::net::UnixStream::pair().unwrap();
+        let me = peer_executable(&a).expect("a connection to ourselves");
+        assert_eq!(std::fs::canonicalize(me).unwrap(), std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap());
+        drop(b);
+        // a handle on a process that has ended says so (where the kernel has pidfds)
+        let mut child = std::process::Command::new("true").spawn().unwrap();
+        let fd = unsafe { libc::syscall(libc::SYS_pidfd_open, child.id() as libc::pid_t, 0) } as i32;
+        child.wait().unwrap();
+        if fd >= 0 {
+            use std::os::fd::FromRawFd;
+            let h = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
+            assert!(!still_running(&h));
+        }
+    }
+
+    #[test]
+    fn a_program_in_a_mount_namespace_of_its_own_cannot_borrow_a_system_path() {
+        // the real thing, where this test may make a mount namespace (root, as in CI containers):
+        // inside it /usr/bin/yes is really `sleep`, and the kernel reports "/usr/bin/yes"
+        let script = "mount --bind /bin/sleep /usr/bin/yes && exec /usr/bin/yes 30";
+        let Ok(mut child) = std::process::Command::new("unshare").args(["-m", "sh", "-c", script]).stderr(std::process::Stdio::null()).spawn() else {
+            return;
+        };
+        let pid = child.id() as i32;
+        let link = format!("/proc/{pid}/exe");
+        let t0 = std::time::Instant::now();
+        let mut posed = false;
+        while t0.elapsed() < std::time::Duration::from_secs(5) {
+            if matches!(child.try_wait(), Ok(Some(_))) {
+                break; // not allowed here
+            }
+            if std::fs::read_link(&link).map(|p| p == Path::new("/usr/bin/yes")).unwrap_or(false) {
+                posed = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        let seen = verified_executable(pid);
+        let _ = child.kill();
+        let _ = child.wait();
+        if !posed {
+            eprintln!("cannot make a mount namespace here: test skipped");
+            return;
+        }
+        assert!(seen.is_none(), "sleep posing as /usr/bin/yes was believed: {seen:?}");
     }
 }
