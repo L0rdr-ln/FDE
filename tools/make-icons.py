@@ -83,6 +83,7 @@ def arcs_wifi(cx, cy, radii, width=7):
 
 # ------------------------------------------------------------------ glyphs (128 box, drawn in white)
 G = {}
+G["bluetooth"] = f'<path d="M48 48 L80 80 L64 94 V34 L80 48 L48 80" fill="none" stroke="{W}" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>'
 G["terminal"] = f'<path d="M34 42 L58 64 L34 86" fill="none" stroke="{W}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><rect x="64" y="80" width="30" height="10" rx="5"/>'
 G["folder_small"] = '<path d="M28 46 h26 l8 9 h38 a6 6 0 0 1 6 6 v30 a6 6 0 0 1 -6 6 h-72 a6 6 0 0 1 -6 -6 v-39 a6 6 0 0 1 6 -6 z"/>'
 G["home"] = '<path d="M64 28 L98 58 H88 V92 H72 V70 H56 V92 H40 V58 H30 Z"/>'
@@ -199,6 +200,7 @@ add("actions", ["system-reboot", "view-refresh"], tile("rb", YELLOW, G["reboot"]
 add("actions", ["system-shutdown"], tile("sd", RED, G["power"]))
 
 add("status", ["network-wireless", "network-wireless-signal-excellent", "network-wireless-signal-good"], tile("ww", TEAL, G["wifi"]))
+add("status", ["bluetooth", "bluetooth-active", "bluetooth-symbolic"], tile("bt", BLUE, G["bluetooth"]))
 add("status", ["network-wired", "network-wired-symbolic"], tile("wd", TEAL, G["wired"]))
 add("status", ["audio-volume-high"], tile("v3", PURPLE, volume(3)))
 add("status", ["audio-volume-medium"], tile("v2", PURPLE, volume(2)))

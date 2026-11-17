@@ -231,6 +231,100 @@ pub fn parse_wifi_list(out: &str) -> Vec<WifiNet> {
     nets
 }
 
+/// A paired Bluetooth device.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BtDevice {
+    pub mac: String,
+    pub name: String,
+    pub connected: bool,
+}
+
+/// The state of the first Bluetooth controller.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct BtState {
+    pub powered: bool,
+    pub devices: Vec<BtDevice>,
+}
+
+/// Is this a Bluetooth address (six pairs of hex digits)?
+pub fn is_mac(s: &str) -> bool {
+    let parts: Vec<&str> = s.split(':').collect();
+    parts.len() == 6 && parts.iter().all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// `bluetoothctl show`: is the controller on? (None: there is no controller.)
+pub fn parse_bt_show(text: &str) -> Option<bool> {
+    if !text.lines().any(|l| l.trim_start().starts_with("Controller ")) {
+        return None;
+    }
+    Some(text.lines().any(|l| l.trim().eq_ignore_ascii_case("powered: yes")))
+}
+
+/// `bluetoothctl devices Paired`: (address, name) per line.
+pub fn parse_bt_devices(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|l| {
+            let rest = l.trim().strip_prefix("Device ")?;
+            let (mac, name) = rest.split_once(' ').unwrap_or((rest, ""));
+            is_mac(mac).then(|| (mac.to_string(), name.trim().chars().filter(|c| !c.is_control()).take(60).collect::<String>()))
+        })
+        .collect()
+}
+
+/// `bluetoothctl info ADDRESS`: is it connected?
+pub fn parse_bt_connected(text: &str) -> bool {
+    text.lines().any(|l| l.trim().eq_ignore_ascii_case("connected: yes"))
+}
+
+/// The label on the task bar: "BT" when on, with the number of connected devices, "BT off".
+pub fn bluetooth_label(b: &BtState) -> String {
+    if !b.powered {
+        return "BT off".to_string();
+    }
+    match b.devices.iter().filter(|d| d.connected).count() {
+        0 => "BT".to_string(),
+        n => format!("BT {n}"),
+    }
+}
+
+fn bt(args: &[&str]) -> Option<String> {
+    let out = Command::new("timeout").arg("3").arg("bluetoothctl").args(args).output().ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// Whether there is a controller and is it on (quick: for the task bar's label).
+pub fn bluetooth_powered() -> Option<bool> {
+    parse_bt_show(&bt(&["show"])?)
+}
+
+/// The controller and its paired devices (takes a moment: one call per device).
+pub fn bluetooth() -> Option<BtState> {
+    let powered = bluetooth_powered()?;
+    let list = bt(&["devices", "Paired"]).or_else(|| bt(&["paired-devices"])).unwrap_or_default();
+    let devices = parse_bt_devices(&list)
+        .into_iter()
+        .take(12)
+        .map(|(mac, name)| {
+            let connected = bt(&["info", &mac]).is_some_and(|t| parse_bt_connected(&t));
+            BtDevice { name: if name.is_empty() { mac.clone() } else { name }, mac, connected }
+        })
+        .collect();
+    Some(BtState { powered, devices })
+}
+
+/// Connect a device, or disconnect it if it is connected (in the background: it can take seconds).
+pub fn bluetooth_toggle(mac: &str, connected: bool) {
+    if !is_mac(mac) {
+        return;
+    }
+    let _ = Command::new("bluetoothctl").args([if connected { "disconnect" } else { "connect" }, mac]).spawn();
+}
+
+/// Switch the controller on or off.
+pub fn bluetooth_power(on: bool) {
+    let _ = Command::new("bluetoothctl").args(["power", if on { "on" } else { "off" }]).spawn();
+}
+
 /// The Wi-Fi networks in range, from NetworkManager (None without it). Takes a moment.
 pub fn wifi_networks() -> Option<Vec<WifiNet>> {
     let out = Command::new("timeout").args(["8", "nmcli", "-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY", "dev", "wifi", "list"]).output().ok()?;
@@ -423,5 +517,29 @@ mod tests {
         set_mute(true);
         let text = std::fs::read_to_string(&log).unwrap();
         assert_eq!(text, "set-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%+\nset-volume -l 1.0 @DEFAULT_AUDIO_SINK@ 5%-\nset-mute @DEFAULT_AUDIO_SINK@ toggle\nset-volume @DEFAULT_AUDIO_SINK@ 0.35\nset-volume @DEFAULT_AUDIO_SINK@ 1.00\nset-mute @DEFAULT_AUDIO_SINK@ 1\n");
+    }
+
+    const SHOW: &str = "Controller AA:BB:CC:DD:EE:FF (public)\n\tName: laptop\n\tAlias: laptop\n\tPowered: yes\n\tDiscoverable: no\n";
+    const DEVICES: &str = "Device 11:22:33:44:55:66 WH-1000XM4\nDevice 00:1A:7D:DA:71:13 Magic Mouse\nDevice zz:bad Not a device\nSomething else\nDevice 66:55:44:33:22:11\n";
+
+    #[test]
+    fn bluetoothctl_output_is_read() {
+        assert_eq!(parse_bt_show(SHOW), Some(true));
+        assert_eq!(parse_bt_show(&SHOW.replace("Powered: yes", "Powered: no")), Some(false));
+        assert_eq!(parse_bt_show("No default controller available\n"), None);
+        assert_eq!(parse_bt_show(""), None);
+        let d = parse_bt_devices(DEVICES);
+        assert_eq!(d, vec![("11:22:33:44:55:66".to_string(), "WH-1000XM4".to_string()), ("00:1A:7D:DA:71:13".to_string(), "Magic Mouse".to_string()), ("66:55:44:33:22:11".to_string(), String::new())]);
+        assert!(parse_bt_connected("Device 1\n\tPaired: yes\n\tConnected: yes\n"));
+        assert!(!parse_bt_connected("Device 1\n\tConnected: no\n"));
+        assert!(is_mac("aa:bb:cc:dd:ee:ff") && !is_mac("aa:bb:cc:dd:ee") && !is_mac("aa:bb:cc:dd:ee:gg") && !is_mac("-rf"));
+    }
+
+    #[test]
+    fn the_bluetooth_label_says_on_off_and_how_many_are_connected() {
+        let dev = |c| BtDevice { mac: "11:22:33:44:55:66".into(), name: "x".into(), connected: c };
+        assert_eq!(bluetooth_label(&BtState { powered: false, devices: vec![dev(true)] }), "BT off");
+        assert_eq!(bluetooth_label(&BtState { powered: true, devices: vec![dev(false)] }), "BT");
+        assert_eq!(bluetooth_label(&BtState { powered: true, devices: vec![dev(true), dev(true), dev(false)] }), "BT 2");
     }
 }

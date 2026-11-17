@@ -83,6 +83,7 @@ enum FlyoutKind {
     Tooltip(usize),
     Volume,
     Network,
+    Bluetooth,
     Calendar,
     Notifications,
     /// the menu of tray item `i`
@@ -716,6 +717,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // flyouts: how long the pointer has rested on a window button, and the Wi-Fi list being fetched
     let mut tip_since: Option<(usize, Instant)> = None;
     let wifi_inbox: Arc<Mutex<Option<Vec<fde::status::WifiNet>>>> = Arc::default();
+    let bt_inbox: Arc<Mutex<Option<fde::status::BtState>>> = Arc::default();
     let tray_menu_inbox: Arc<Mutex<Option<Vec<fde::tray::MenuRow>>>> = Arc::default();
     let tray_fallback: Arc<Mutex<Option<usize>>> = Arc::default();
 
@@ -793,6 +795,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 panel::StatusKind::Notifications => want = Some((FlyoutKind::Notifications, center(kind))),
                 panel::StatusKind::Cpu | panel::StatusKind::Memory => {}
                 panel::StatusKind::Network => want = Some((FlyoutKind::Network, center(kind))),
+                panel::StatusKind::Bluetooth => want = Some((FlyoutKind::Bluetooth, center(kind))),
                 panel::StatusKind::KeyboardLayout => fde::kblayout::request_next(),
                 panel::StatusKind::Battery => {}
                 panel::StatusKind::Tray(i) => match tray_entries.get(i) {
@@ -842,6 +845,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 status_now.push((panel::StatusKind::Memory, fde::status::memory_label(p)));
             }
             status_now.push((panel::StatusKind::Network, fde::status::network_label(&fde::status::network())));
+            if let Some(on) = fde::status::bluetooth_powered() {
+                status_now.push((panel::StatusKind::Bluetooth, if on { "BT".to_string() } else { "BT off".to_string() }));
+            }
             if let Some(b) = fde::status::battery() {
                 status_now.push((panel::StatusKind::Battery, fde::status::battery_label(b)));
             }
@@ -1043,6 +1049,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 close = true;
                             }
                         }
+                        (Flyout::Bluetooth { state }, Hit::Bluetooth(i)) => {
+                            if let Some(d) = state.as_ref().and_then(|b| b.devices.get(i)) {
+                                fde::status::bluetooth_toggle(&d.mac, d.connected);
+                                close = true;
+                            }
+                        }
+                        (Flyout::Bluetooth { state }, Hit::BluetoothPower) => {
+                            if let Some(b) = state {
+                                fde::status::bluetooth_power(!b.powered);
+                                close = true;
+                                status_checked = Instant::now() - Duration::from_secs(10);
+                            }
+                        }
                         (Flyout::Network { .. }, Hit::NetworkSettings) => {
                             fde::status::open_network_settings(&terminal());
                             close = true;
@@ -1082,6 +1101,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(list) = wifi_inbox.lock().ok().and_then(|mut g| g.take()) {
                 if let Some(Flyout::Network { networks, .. }) = app.flyout.as_mut().map(|f| &mut f.content) {
                     *networks = Some(list);
+                    app.flyout.as_mut().map(|f| f.dirty = true);
+                }
+            }
+            // the Bluetooth devices arrived
+            if let Some(list) = bt_inbox.lock().ok().and_then(|mut g| g.take()) {
+                if let Some(Flyout::Bluetooth { state }) = app.flyout.as_mut().map(|f| &mut f.content) {
+                    *state = Some(list);
                     app.flyout.as_mut().map(|f| f.dirty = true);
                 }
             }
@@ -1185,6 +1211,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }
                             });
                             Flyout::Network { current: fde::status::network(), networks: None }
+                        }
+                        FlyoutKind::Bluetooth => {
+                            if let Ok(mut g) = bt_inbox.lock() {
+                                *g = None;
+                            }
+                            let inbox = bt_inbox.clone();
+                            std::thread::spawn(move || {
+                                let b = fde::status::bluetooth().unwrap_or_default();
+                                if let Ok(mut g) = inbox.lock() {
+                                    *g = Some(b);
+                                }
+                            });
+                            Flyout::Bluetooth { state: None }
                         }
                         FlyoutKind::Calendar => {
                             let t = flyout::today();

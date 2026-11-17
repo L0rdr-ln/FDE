@@ -4,7 +4,7 @@
 //! `bin/fde-panel.rs` puts them on screen as layer-shell surfaces.
 
 use crate::panel::{blend, blit};
-use crate::status::{Network, WifiNet};
+use crate::status::{BtState, Network, WifiNet};
 use crate::text::TextRenderer;
 
 /// One line of the notification history.
@@ -24,6 +24,8 @@ pub enum Flyout {
     Volume { percent: u32, muted: bool },
     /// `networks` is None while the list is being fetched
     Network { current: Network, networks: Option<Vec<WifiNet>> },
+    /// the paired Bluetooth devices; None while they are being fetched
+    Bluetooth { state: Option<BtState> },
     /// the month shown, and today's date (year, month, day)
     Calendar { year: i32, month: u32, today: (i32, u32, u32) },
     Notifications { items: Vec<HistoryItem>, dnd: bool },
@@ -40,6 +42,10 @@ pub enum Hit {
     Mute,
     Network(usize),
     NetworkSettings,
+    /// a Bluetooth device row (connect or disconnect it)
+    Bluetooth(usize),
+    /// the switch for the Bluetooth controller
+    BluetoothPower,
     CalPrev,
     CalNext,
     CalToday,
@@ -112,6 +118,10 @@ fn shown_rows(f: &Flyout) -> usize {
     match f {
         Flyout::Network { networks, .. } => networks.as_ref().map(|n| n.len().min(MAX_NETWORKS)).unwrap_or(0).max(1),
         Flyout::Notifications { items, .. } => items.len().min(MAX_HISTORY).max(1),
+        Flyout::Bluetooth { state } => match state {
+            Some(b) if b.powered => b.devices.len().min(MAX_NETWORKS).max(1),
+            _ => 1,
+        },
         _ => 0,
     }
 }
@@ -152,6 +162,7 @@ pub fn size(f: &Flyout, text: &mut TextRenderer, s: i32) -> (i32, i32) {
         }
         Flyout::Volume { .. } => (250, 96),
         Flyout::Network { .. } => (270, 44 + shown_rows(f) as i32 * ROW + 12 + BTN_H + 12),
+        Flyout::Bluetooth { .. } => (270, 44 + shown_rows(f) as i32 * ROW + 12 + BTN_H + 12),
         Flyout::Calendar { .. } => (252, 62 + 6 * CAL_CELL.1 + 12),
         Flyout::Notifications { .. } => (330, 44 + shown_rows(f) as i32 * HISTORY_ROW + 12 + BTN_H + 12),
     }
@@ -210,7 +221,7 @@ pub fn hit(f: &Flyout, x: f64, y: f64) -> Hit {
         // the hit test needs only the width, which does not depend on the text
         match f {
             Flyout::Volume { .. } => (250, 0),
-            Flyout::Network { .. } => (270, 0),
+            Flyout::Network { .. } | Flyout::Bluetooth { .. } => (270, 0),
             Flyout::Calendar { .. } => (252, 0),
             Flyout::Notifications { .. } => (330, 0),
             Flyout::Menu { .. } => (MENU_W, 0),
@@ -245,6 +256,21 @@ pub fn hit(f: &Flyout, x: f64, y: f64) -> Hit {
             }
             if inside(footer_rect(w, network_rows_end(f)), x, y) {
                 return Hit::NetworkSettings;
+            }
+            Hit::None
+        }
+        Flyout::Bluetooth { state } => {
+            let n = shown_rows(f);
+            if let Some(b) = state.as_ref().filter(|b| b.powered && !b.devices.is_empty()) {
+                if x >= PAD as f64 && x < (w - PAD) as f64 && y >= 44.0 && y < (44 + n as i32 * ROW) as f64 {
+                    let i = ((y - 44.0) / ROW as f64) as usize;
+                    if i < b.devices.len() {
+                        return Hit::Bluetooth(i);
+                    }
+                }
+            }
+            if state.is_some() && inside(footer_rect(w, network_rows_end(f)), x, y) {
+                return Hit::BluetoothPower;
             }
             Hit::None
         }
@@ -486,6 +512,39 @@ pub fn draw(f: &Flyout, text: &mut TextRenderer, s: i32, hover: Hit) -> Vec<u8> 
             tile(&mut buf, w, h, fr, s, hover == Hit::NetworkSettings);
             button_label(text, &mut buf, w, h, s, fr, "Network settings…", ink);
         }
+        Flyout::Bluetooth { state } => {
+            label(text, &mut buf, w, h, s, "Bluetooth", PAD, 22, 14.0, ink, lw - 2 * PAD);
+            match state {
+                None => {
+                    label(text, &mut buf, w, h, s, "Looking for devices…", PAD, 44 + ROW / 2, 13.0, soft, lw - 2 * PAD);
+                }
+                Some(b) if !b.powered => {
+                    label(text, &mut buf, w, h, s, "Bluetooth is off", PAD, 44 + ROW / 2, 13.0, soft, lw - 2 * PAD);
+                }
+                Some(b) if b.devices.is_empty() => {
+                    label(text, &mut buf, w, h, s, "No paired devices", PAD, 44 + ROW / 2, 13.0, soft, lw - 2 * PAD);
+                }
+                Some(b) => {
+                    for (i, d) in b.devices.iter().take(MAX_NETWORKS).enumerate() {
+                        let row = (PAD - 4, 44 + i as i32 * ROW, lw - PAD + 4, 44 + (i as i32 + 1) * ROW);
+                        if hover == Hit::Bluetooth(i) {
+                            fill_box(&mut buf, w, h, scaled((row.0, row.1 + 1, row.2, row.3 - 1), s), 4.0 * s as f32, s, |t| ([0.86 - 0.06 * t, 0.93 - 0.04 * t, 1.0], 0.95), 0.0, [0.45, 0.65, 0.9]);
+                        }
+                        let mid = (row.1 + row.3) / 2;
+                        if d.connected {
+                            fill_box(&mut buf, w, h, scaled((PAD, mid - 4, PAD + 9, mid + 5), s), 4.5 * s as f32, s, |t| (pal.light(0.05 + 0.25 * (1.0 - t)), 0.95), 0.5, pal.dark(0.7));
+                        }
+                        label(text, &mut buf, w, h, s, &d.name, PAD + 18, mid, 13.0, ink, lw - 2 * PAD - 18 - 74);
+                        label(text, &mut buf, w, h, s, if d.connected { "connected" } else { "" }, lw - PAD - 70, mid, 12.0, soft, 74);
+                    }
+                }
+            }
+            if let Some(b) = state {
+                let fr = footer_rect(lw, network_rows_end(f));
+                tile(&mut buf, w, h, fr, s, hover == Hit::BluetoothPower);
+                button_label(text, &mut buf, w, h, s, fr, if b.powered { "Turn Bluetooth off" } else { "Turn Bluetooth on" }, ink);
+            }
+        }
         Flyout::Calendar { year, month, today } => {
             let title = format!("{} {}", MONTHS[*month as usize - 1], year);
             let (p, n) = (cal_prev_rect(), cal_next_rect(lw));
@@ -616,6 +675,8 @@ mod tests {
             Flyout::Volume { percent: 70, muted: true },
             Flyout::Network { current: Network::Wired, networks: Some(vec![WifiNet { ssid: "Home".into(), signal: 70, active: true, secure: true }]) },
             Flyout::Network { current: Network::Offline, networks: None },
+            Flyout::Bluetooth { state: None },
+            Flyout::Bluetooth { state: Some(BtState { powered: true, devices: vec![crate::status::BtDevice { mac: "11:22:33:44:55:66".into(), name: "Headset".into(), connected: true }] }) },
             Flyout::Calendar { year: 2026, month: 2, today: (2026, 2, 3) },
             Flyout::Notifications { items: vec![HistoryItem { app: "Mail".into(), summary: "Hello".into(), body: "Lunch?".into(), age: "now".into() }], dnd: true },
         ];
@@ -661,5 +722,23 @@ mod tests {
         if let Some(out) = std::env::var_os("FDE_FLYOUT_SHEET") {
             crate::demo::write_png(out.to_str().unwrap(), &px, w, h, false).unwrap();
         }
+    }
+
+    #[test]
+    fn the_bluetooth_flyout_has_device_rows_and_a_power_button() {
+        use crate::status::BtDevice;
+        let dev = |n: &str| BtDevice { mac: "11:22:33:44:55:66".into(), name: n.into(), connected: false };
+        let on = Flyout::Bluetooth { state: Some(BtState { powered: true, devices: vec![dev("a"), dev("b")] }) };
+        assert_eq!(hit(&on, 100.0, 44.0 + 30.0), Hit::Bluetooth(1));
+        let mut t = TextRenderer::default();
+        let (_, h) = size(&on, &mut t, 1);
+        assert_eq!(hit(&on, 100.0, (h - 20) as f64), Hit::BluetoothPower);
+        // off: no device rows, only the switch
+        let off = Flyout::Bluetooth { state: Some(BtState { powered: false, devices: vec![dev("a")] }) };
+        assert_eq!(hit(&off, 100.0, 44.0 + 10.0), Hit::None);
+        let (_, h) = size(&off, &mut t, 1);
+        assert_eq!(hit(&off, 100.0, (h - 20) as f64), Hit::BluetoothPower);
+        // while fetching there is nothing to press
+        assert_eq!(hit(&Flyout::Bluetooth { state: None }, 100.0, 60.0), Hit::None);
     }
 }

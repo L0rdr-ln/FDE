@@ -400,6 +400,8 @@ pub enum StatusKind {
     Memory,
     Volume,
     Network,
+    /// shown only when the machine has a Bluetooth controller
+    Bluetooth,
     KeyboardLayout,
     Battery,
     DoNotDisturb,
@@ -428,6 +430,7 @@ fn status_icon_name(kind: StatusKind, label: &str) -> Option<&'static str> {
             Some(if pct >= 66 { "audio-volume-high" } else if pct >= 33 { "audio-volume-medium" } else { "audio-volume-low" })
         }
         StatusKind::Network => Some(if label.to_lowercase().starts_with("wired") { "network-wired" } else { "network-wireless" }),
+        StatusKind::Bluetooth => Some("bluetooth"),
         StatusKind::Battery => Some("battery"),
         _ => None,
     }
