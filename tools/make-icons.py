@@ -130,6 +130,7 @@ G["display"] = '<rect x="26" y="34" width="76" height="50" rx="7"/><path d="M52 
 G["keyboard"] = '<rect x="22" y="44" width="84" height="46" rx="8"/>' + "".join(f'<rect x="{30 + c * 13}" y="{52 + r * 13}" width="9" height="8" rx="2" fill="#0004"/>' for r in range(3) for c in range(6))
 G["person"] = '<circle cx="64" cy="48" r="16"/><path d="M32 100 a32 28 0 0 1 64 0 Z"/>'
 G["palette"] = f'<path d="M64 30 a34 34 0 1 0 0 68 c8 0 9 -7 5 -12 c-4 -5 -1 -12 6 -12 h10 a14 14 0 0 0 14 -14 c0 -18 -16 -30 -35 -30 Z"/><circle cx="46" cy="58" r="6" fill="#0005"/><circle cx="62" cy="46" r="6" fill="#0005"/><circle cx="80" cy="52" r="6" fill="#0005"/>'
+G["sun"] = f'<circle cx="64" cy="64" r="20"/>' + "".join(f'<path d="M{64 + 30 * math.cos(a):.1f} {64 + 30 * math.sin(a):.1f} L{64 + 42 * math.cos(a):.1f} {64 + 42 * math.sin(a):.1f}" stroke="{W}" stroke-width="8" stroke-linecap="round"/>' for a in [i * math.pi / 4 for i in range(8)])
 G["download"] = f'<path d="M64 30 V68 M46 54 L64 72 L82 54" fill="none" stroke="{W}" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/><path d="M34 90 H94" stroke="{W}" stroke-width="10" stroke-linecap="round"/>'
 
 
@@ -203,6 +204,7 @@ add("status", ["audio-volume-high"], tile("v3", PURPLE, volume(3)))
 add("status", ["audio-volume-medium"], tile("v2", PURPLE, volume(2)))
 add("status", ["audio-volume-low"], tile("v1", PURPLE, volume(1)))
 add("status", ["audio-volume-muted"], tile("v0", GREY, volume(0, True)))
+add("status", ["display-brightness", "display-brightness-symbolic"], tile("br", YELLOW, G["sun"]))
 add("status", ["battery", "battery-full", "battery-good", "battery-low"], tile("bt", GREEN, G["battery"]))
 add("status", ["dialog-information"], dialog("info"))
 add("status", ["dialog-warning"], dialog("warning"))

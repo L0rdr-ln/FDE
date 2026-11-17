@@ -2105,6 +2105,32 @@ fn window_rules_size_place_float_and_send_windows_by_what_they_are() {
 }
 
 #[test]
+fn the_volume_and_brightness_keys_show_a_glass_panel_with_an_icon_and_a_bar() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    let Some((mut renderer, mut hn, glass, mut scene)) = effects_harness(dir.path(), "fde-e2e-osd") else { return };
+    hn.state.config.appearance.bubbles = false;
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let plain = grab_scene(&mut renderer, &mut scene);
+    hn.state.hud = Some((Instant::now(), "Volume: 70%".into()));
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let with = grab_scene(&mut renderer, &mut scene);
+    dump_frame(&with, 800, 600, "osd", 0);
+    // the panel is at the bottom middle, above where a task bar would be
+    let (pw, ph) = (fde::osd::W, fde::osd::H);
+    let (x0, y0) = ((800 - pw) / 2, 600 - ph - 110);
+    let changed = (0..ph).step_by(2).flat_map(|y| (0..pw).step_by(2).map(move |x| (x, y))).filter(|&(x, y)| pixel(&with, 800, x0 + x, y0 + y) != pixel(&plain, 800, x0 + x, y0 + y)).count();
+    assert!(changed > pw as usize * ph as usize / 8, "the panel covers its place: {changed} sample points differ");
+    // outside it nothing changed
+    assert_eq!(pixel(&with, 800, 20, 20), pixel(&plain, 800, 20, 20));
+    // other words are still the plain note in the middle of the screen, not the panel
+    hn.state.hud = Some((Instant::now(), "Workspace 2".into()));
+    hn.state.render_scene(&mut renderer, &glass, &mut scene).unwrap();
+    let note = grab_scene(&mut renderer, &mut scene);
+    assert_eq!(pixel(&note, 800, x0 + 5, y0 + 5), pixel(&plain, 800, x0 + 5, y0 + 5), "no panel for other messages");
+}
+
+#[test]
 fn a_wallpaper_picture_from_the_configuration_is_what_the_monitor_shows() {
     let dir = tempfile::tempdir().unwrap();
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

@@ -285,7 +285,7 @@ fn round_cover(x: f32, y: f32, r: (f32, f32, f32, f32), rad: f32) -> (f32, f32) 
 /// Fill a rounded box (pixels) with `fill(t)` = (colour, alpha) down its height, a bright rim and
 /// a thin shade inside it.
 #[allow(clippy::too_many_arguments)]
-fn fill_box(buf: &mut [u8], w: i32, h: i32, r: Rect, rad: f32, s: i32, fill: impl Fn(f32) -> ([f32; 3], f32), rim: f32, shade: [f32; 3]) {
+pub(crate) fn fill_box(buf: &mut [u8], w: i32, h: i32, r: Rect, rad: f32, s: i32, fill: impl Fn(f32) -> ([f32; 3], f32), rim: f32, shade: [f32; 3]) {
     let sf = s as f32;
     let rf = (r.0 as f32, r.1 as f32, r.2 as f32, r.3 as f32);
     for y in r.1.max(0)..r.3.min(h) {
@@ -308,7 +308,7 @@ fn fill_box(buf: &mut [u8], w: i32, h: i32, r: Rect, rad: f32, s: i32, fill: imp
 }
 
 /// The light glass of the task bar and the windows, as a rounded sheet.
-fn glass(buf: &mut [u8], w: i32, h: i32, s: i32) {
+pub(crate) fn glass(buf: &mut [u8], w: i32, h: i32, s: i32) {
     let pal = crate::theme::palette();
     let rad = (10.0 - 10.0 * pal.solid) * s as f32;
     fill_box(
@@ -335,7 +335,7 @@ fn glass(buf: &mut [u8], w: i32, h: i32, s: i32) {
     }
 }
 
-fn scaled(r: Rect, s: i32) -> Rect {
+pub(crate) fn scaled(r: Rect, s: i32) -> Rect {
     (r.0 * s, r.1 * s, r.2 * s, r.3 * s)
 }
 
@@ -355,7 +355,7 @@ fn tile(buf: &mut [u8], w: i32, h: i32, r: Rect, s: i32, hot: bool) {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn label(text: &mut TextRenderer, buf: &mut [u8], w: i32, h: i32, s: i32, s_text: &str, x: i32, y_mid: i32, px: f32, color: [u8; 3], max_w: i32) -> i32 {
+pub(crate) fn label(text: &mut TextRenderer, buf: &mut [u8], w: i32, h: i32, s: i32, s_text: &str, x: i32, y_mid: i32, px: f32, color: [u8; 3], max_w: i32) -> i32 {
     match text.line(s_text, max_w * s, px * s as f32, color, Some(([255, 255, 255], 0.8)), 2 * s) {
         Some(img) => {
             let (iw, ih) = (img.width, img.height);

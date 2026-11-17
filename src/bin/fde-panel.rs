@@ -349,6 +349,12 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
 /// Click tray item `i` (`action`: activate, secondary or context) through `fde-tray`, which is
 /// installed next to the task bar.
 fn tray_click(entries: &[fde::tray::Entry], i: usize, action: &str, x: i32) {
+    tray_click_with(entries, i, action, x, None)
+}
+
+/// The same; when `failed` is given and the program cannot do `action` (appindicator programs have
+/// no Activate), its index is put there so that the task bar can open the menu instead.
+fn tray_click_with(entries: &[fde::tray::Entry], i: usize, action: &str, x: i32, failed: Option<Arc<Mutex<Option<usize>>>>) {
     let Some(e) = entries.get(i) else { return };
     let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("fde-tray")));
     let Some(exe) = exe.filter(|p| p.exists()) else { return };
@@ -356,7 +362,12 @@ fn tray_click(entries: &[fde::tray::Entry], i: usize, action: &str, x: i32) {
     if let Ok(mut child) = Command::new(exe).args([action, &e.item.service, &e.item.path, &x.to_string(), "0"]).spawn() {
         // reaped in the background (a click is short)
         std::thread::spawn(move || {
-            let _ = child.wait();
+            let ok = child.wait().map(|s| s.success()).unwrap_or(true);
+            if let (false, Some(slot)) = (ok, failed) {
+                if let Ok(mut g) = slot.lock() {
+                    *g = Some(i);
+                }
+            }
         });
     }
 }
@@ -706,6 +717,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut tip_since: Option<(usize, Instant)> = None;
     let wifi_inbox: Arc<Mutex<Option<Vec<fde::status::WifiNet>>>> = Arc::default();
     let tray_menu_inbox: Arc<Mutex<Option<Vec<fde::tray::MenuRow>>>> = Arc::default();
+    let tray_fallback: Arc<Mutex<Option<usize>>> = Arc::default();
 
     let mut pinned: Vec<String> = fde::config::Config::load().map(|c| c.shell.pinned).unwrap_or_default();
     let mut pinned_checked = Instant::now();
@@ -786,8 +798,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 panel::StatusKind::Tray(i) => match tray_entries.get(i) {
                     // an item that is only a menu opens it
                     Some(e) if e.is_menu && !e.menu.is_empty() => want = Some((FlyoutKind::TrayMenu(i), center(kind))),
+                    // a program with no Activate but a menu shows its menu
+                    Some(e) if !e.menu.is_empty() => tray_click_with(&tray_entries, i, "activate", center(kind), Some(tray_fallback.clone())),
                     _ => tray_click(&tray_entries, i, "activate", center(kind)),
                 },
+            }
+        }
+        // an item that could not be activated: its menu instead
+        if let Some(i) = tray_fallback.lock().ok().and_then(|mut g| g.take()) {
+            let x = app.status_rects.iter().find(|(k, _, _)| *k == panel::StatusKind::Tray(i)).map(|(_, x0, x1)| (x0 + x1) / 2).unwrap_or(0);
+            if tray_entries.get(i).is_some_and(|e| !e.menu.is_empty()) {
+                want = Some((FlyoutKind::TrayMenu(i), x));
             }
         }
         if let Some((i, button)) = app.click_tray.take() {

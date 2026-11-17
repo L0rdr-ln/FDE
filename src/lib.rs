@@ -28,6 +28,7 @@ pub mod lockscreen;
 pub mod nightlight;
 pub mod notify;
 pub mod obtheme;
+pub mod osd;
 pub mod outputs;
 pub mod layout;
 pub mod panel;
