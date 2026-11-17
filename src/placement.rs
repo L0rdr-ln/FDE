@@ -105,8 +105,13 @@ impl Fde {
         if !self.config.session.restore {
             return;
         }
-        let ids: Vec<String> = self.space.elements().filter(|w| self.parent_window(w).is_none()).filter_map(app_id).collect();
-        crate::session::save(&ids);
+        let entries: Vec<crate::session::Entry> = self
+            .space
+            .elements()
+            .filter(|w| self.parent_window(w).is_none())
+            .filter_map(|w| app_id(w).map(|id| crate::session::Entry { id, workspace: crate::windows::info(w).lock().unwrap().workspace }))
+            .collect();
+        crate::session::save(&entries);
     }
 
     /// A window is about to close: remember where it was (its normal place if it is maximized

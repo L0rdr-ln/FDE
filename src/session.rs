@@ -13,23 +13,35 @@ pub fn state_file() -> Option<PathBuf> {
     Some(base.join("fde").join("session"))
 }
 
-/// The app ids to write: each once, in the order of the windows; names that would break the
-/// file are left out.
-pub fn to_text(ids: &[String]) -> String {
-    let mut seen: Vec<&str> = Vec::new();
-    for id in ids {
-        if !id.is_empty() && !id.contains(['\t', '\n', '\r']) && !seen.contains(&id.as_str()) {
-            seen.push(id);
-        }
-    }
-    seen.iter().take(32).map(|s| format!("{s}\n")).collect()
+/// A program that was open: its app id and the workspace of its first window (0 = the first).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Entry {
+    pub id: String,
+    pub workspace: usize,
 }
 
-pub fn parse(text: &str) -> Vec<String> {
-    let mut out: Vec<String> = Vec::new();
+/// The entries to write ("id TAB workspace" per line): each program once, in the order of the
+/// windows; names that would break the file are left out.
+pub fn to_text(entries: &[Entry]) -> String {
+    let mut seen: Vec<&str> = Vec::new();
+    let mut out = String::new();
+    for e in entries {
+        if !e.id.is_empty() && !e.id.contains(['\t', '\n', '\r']) && !seen.contains(&e.id.as_str()) && seen.len() < 32 {
+            seen.push(&e.id);
+            out.push_str(&format!("{}\t{}\n", e.id, e.workspace));
+        }
+    }
+    out
+}
+
+/// Read the file (a line without a workspace, as older versions wrote, means the first one).
+pub fn parse(text: &str) -> Vec<Entry> {
+    let mut out: Vec<Entry> = Vec::new();
     for l in text.lines().map(str::trim).filter(|l| !l.is_empty()).take(64) {
-        if !out.iter().any(|o| o == l) {
-            out.push(l.to_string());
+        let (id, ws) = l.split_once('\t').unwrap_or((l, "0"));
+        let workspace = ws.trim().parse::<usize>().unwrap_or(0).min(8);
+        if !out.iter().any(|o| o.id == id) {
+            out.push(Entry { id: id.to_string(), workspace });
         }
     }
     out
@@ -37,13 +49,13 @@ pub fn parse(text: &str) -> Vec<String> {
 
 /// The commands to start: the installed program of each saved id, except those that run
 /// already (`running`: app ids of the open windows, e.g. started by autostart).
-pub fn commands(saved: &[String], apps: &[App], running: &[String]) -> Vec<String> {
+pub fn commands(saved: &[Entry], apps: &[App], running: &[String]) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    for id in saved {
-        if running.contains(id) {
+    for e in saved {
+        if running.contains(&e.id) {
             continue;
         }
-        if let Some(app) = crate::apps::for_window(apps, id) {
+        if let Some(app) = crate::apps::for_window(apps, &e.id) {
             if !app.exec.trim().is_empty() && !out.contains(&app.exec) {
                 out.push(app.exec.clone());
             }
@@ -53,9 +65,9 @@ pub fn commands(saved: &[String], apps: &[App], running: &[String]) -> Vec<Strin
 }
 
 /// Write the list (an empty list removes the file).
-pub fn save(ids: &[String]) {
+pub fn save(entries: &[Entry]) {
     let Some(f) = state_file() else { return };
-    let text = to_text(ids);
+    let text = to_text(entries);
     if text.is_empty() {
         let _ = std::fs::remove_file(&f);
         return;
@@ -69,7 +81,7 @@ pub fn save(ids: &[String]) {
     }
 }
 
-pub fn load() -> Vec<String> {
+pub fn load() -> Vec<Entry> {
     state_file().and_then(|f| std::fs::read_to_string(f).ok()).map(|t| parse(&t)).unwrap_or_default()
 }
 
@@ -96,18 +108,25 @@ mod tests {
         App { name: id.into(), exec: exec.into(), id: id.into(), ..Default::default() }
     }
 
+    fn entry(id: &str, workspace: usize) -> Entry {
+        Entry { id: id.into(), workspace }
+    }
+
     #[test]
     fn the_list_is_written_and_read_back_without_duplicates_or_broken_names() {
-        let ids: Vec<String> = ["foot", "foot", "org.gnome.Nautilus", "bad\tname", "", "x\ny"].iter().map(|s| s.to_string()).collect();
-        assert_eq!(to_text(&ids), "foot\norg.gnome.Nautilus\n");
-        assert_eq!(parse("foot\n\n  org.gnome.Nautilus \nfoot\n"), vec!["foot", "org.gnome.Nautilus"]);
+        let e = vec![entry("foot", 1), entry("foot", 2), entry("org.gnome.Nautilus", 0), entry("bad\tname", 0), entry("", 0), entry("x\ny", 0)];
+        assert_eq!(to_text(&e), "foot\t1\norg.gnome.Nautilus\t0\n");
+        assert_eq!(parse(&to_text(&e)), vec![entry("foot", 1), entry("org.gnome.Nautilus", 0)]);
+        // the older format has no workspace; nonsense and huge numbers are tamed
+        assert_eq!(parse("foot\n\n  org.gnome.Nautilus \nfoot\n"), vec![entry("foot", 0), entry("org.gnome.Nautilus", 0)]);
+        assert_eq!(parse("a\tzz\nb\t99999\n"), vec![entry("a", 0), entry("b", 8)]);
         assert!(parse("").is_empty());
     }
 
     #[test]
     fn only_installed_programs_that_are_not_running_come_back() {
         let apps = vec![app("foot", "foot"), app("org.gnome.Nautilus", "nautilus --new-window")];
-        let saved: Vec<String> = ["foot", "org.gnome.Nautilus", "ghost"].iter().map(|s| s.to_string()).collect();
+        let saved = vec![entry("foot", 0), entry("org.gnome.Nautilus", 2), entry("ghost", 0)];
         assert_eq!(commands(&saved, &apps, &[]), vec!["foot", "nautilus --new-window"]);
         assert_eq!(commands(&saved, &apps, &["foot".to_string()]), vec!["nautilus --new-window"]);
         assert!(commands(&[], &apps, &[]).is_empty());

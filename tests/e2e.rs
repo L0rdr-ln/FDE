@@ -5961,3 +5961,42 @@ fn a_pinned_program_has_a_button_that_starts_it_and_its_windows_share_that_butto
     let _ = panel.kill();
     let _ = panel.wait();
 }
+
+#[test]
+fn session_restore_puts_a_program_back_on_its_workspace_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    std::env::set_var("XDG_STATE_HOME", dir.path().join("state"));
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (1000, 700).into());
+    state.config.appearance.animations = false;
+    state.config.shell.remember_windows = false;
+    state.restored_workspaces = vec![fde::session::Entry { id: "org.example.Back".into(), workspace: 2 }];
+    let socket = ListeningSocket::bind("fde-e2e-restore").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let open_named = |hn: &mut Harness, app: &'static str| {
+        let (tx, rx) = mpsc::channel();
+        let path = dir.path().join("fde-e2e-restore");
+        std::thread::spawn(move || named_client(path, tx, app, 240, 160));
+        let t0 = Instant::now();
+        loop {
+            hn.pump();
+            if let Ok(Msg::Mapped { .. }) = rx.try_recv() {
+                break;
+            }
+            assert!(t0.elapsed() < Duration::from_secs(10), "no window");
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        hn.pump_for(80);
+    };
+    let of = |hn: &Harness, app: &str| hn.state.space.elements().chain(std::iter::empty()).find(|w| fde::placement::app_id(w).as_deref() == Some(app)).cloned();
+    open_named(&mut hn, "org.example.Other");
+    assert!(hn.state.window_workspace_of(&of(&hn, "org.example.Other").unwrap()) == 0, "an unknown program stays here");
+    assert_eq!(hn.state.restored_workspaces.len(), 1);
+    open_named(&mut hn, "org.example.Back");
+    hn.state.switch_workspace(2);
+    let back = of(&hn, "org.example.Back").expect("on the third workspace");
+    assert_eq!(hn.state.window_workspace_of(&back), 2);
+    assert!(hn.state.restored_workspaces.is_empty(), "used up: a second window of it is not moved");
+}

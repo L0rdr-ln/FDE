@@ -29,7 +29,7 @@ is the first thing to do (see "Next").
       direct scanout, multi-GPU laptops
 - [x] hot corner for the overview (`shell.hot_corner`), drag windows to a workspace in the overview
 - [x] window rules (`[[rules]]`: float, size, position, centre, workspace, on top, maximize)
-- [x] session restore (`session.restore`: the programs that were open come back; their workspaces and window groups do not yet)
+- [x] session restore (`session.restore`: the programs that were open come back, each on its workspace; window groups and positions of several windows of one program do not)
 
 ## Shell
 - [x] `fde-panel`: task bar (start orb, task list, clock, workspace dots, volume and battery),

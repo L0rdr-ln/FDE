@@ -199,6 +199,9 @@ impl Fde {
             }
         }
         self.style_apps_live = true;
+        if self.config.session.restore && std::env::var_os("FDE_NO_RESTORE").is_none() {
+            self.restored_workspaces = crate::session::load().into_iter().filter(|e| e.workspace > 0).collect();
+        }
         crate::shell::start_other_clients(&self.config);
         self.write_outputs_state();
         self.write_workspace_state();

@@ -458,6 +458,17 @@ impl Fde {
             return; // no picture yet
         }
         info(window).lock().unwrap().fitted = true;
+        // a program of the last session goes back to its workspace (once)
+        if !self.restored_workspaces.is_empty() {
+            if let Some(app) = crate::placement::app_id(window) {
+                if let Some(i) = self.restored_workspaces.iter().position(|e| e.id == app) {
+                    let e = self.restored_workspaces.remove(i);
+                    if e.workspace != self.workspace && e.workspace < self.workspace_count() {
+                        self.move_window_to_workspace(window, e.workspace);
+                    }
+                }
+            }
+        }
         // the rules of the configuration (`[[rules]]`); one that places the window ends the fitting
         if self.apply_window_rules(window) {
             return;

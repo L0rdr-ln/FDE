@@ -189,6 +189,8 @@ pub struct Fde {
     pub tiled_before: Option<Vec<(Window, Rectangle<i32, Logical>, bool, Option<Rectangle<i32, Logical>>)>>,
     /// where each program's window was last closed
     pub placements: crate::placement::Placements,
+    /// programs of the last session still to be put on their workspace (session restore)
+    pub restored_workspaces: Vec<crate::session::Entry>,
     /// the press that opened or used the window menu: its release goes to nobody
     pub swallow_release: bool,
     /// Alt was let go while the switcher was open: commit after the key event is handled
@@ -443,6 +445,7 @@ impl Fde {
             tile_applied: std::collections::HashMap::new(),
             tiled_before: None,
             placements: crate::placement::load(),
+            restored_workspaces: Vec::new(),
             swallow_release: false,
             switcher_commit: false,
             super_alone: false,
