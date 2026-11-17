@@ -96,6 +96,11 @@ pub fn hot_corner(on: bool) -> Vec<(&'static str, Setting)> {
     vec![("shell.hot_corner", Setting::Bool(on))]
 }
 
+/// Start the programs again that were open when the last session ended.
+pub fn restore(on: bool) -> Vec<(&'static str, Setting)> {
+    vec![("session.restore", Setting::Bool(on))]
+}
+
 /// Style GTK and Qt programs with the theme (appearance.style_apps).
 pub fn style_apps(on: bool) -> Vec<(&'static str, Setting)> {
     vec![("appearance.style_apps", Setting::Bool(on))]

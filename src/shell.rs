@@ -89,6 +89,9 @@ pub fn start_other_clients(config: &crate::config::Config) {
     if config.music.enabled && std::env::var_os("FDE_NO_MUSIC").is_none() {
         start_sibling("fde-music");
     }
+    if config.session.restore && std::env::var_os("FDE_NO_RESTORE").is_none() {
+        crate::session::restore();
+    }
     let extra = std::env::var("FDE_AUTOSTART").ok();
     for cmd in config.shell.autostart.iter().chain(extra.iter()) {
         if let Err(e) = Command::new("sh").arg("-c").arg(cmd).spawn() {

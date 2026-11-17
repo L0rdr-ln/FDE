@@ -99,6 +99,15 @@ pub fn app_id(window: &Window) -> Option<String> {
 }
 
 impl Fde {
+    /// The session ends: write down which programs are open, for the next session to start.
+    pub fn save_session(&self) {
+        if !self.config.session.restore {
+            return;
+        }
+        let ids: Vec<String> = self.space.elements().filter(|w| self.parent_window(w).is_none()).filter_map(app_id).collect();
+        crate::session::save(&ids);
+    }
+
     /// A window is about to close: remember where it was (its normal place if it is maximized
     /// or snapped; nothing if it is full screen or not on the screen).
     pub fn remember_placement(&mut self, window: &Window) {

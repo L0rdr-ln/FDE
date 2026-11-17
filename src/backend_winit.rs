@@ -145,6 +145,7 @@ pub fn run() -> Result<(), Box<dyn std::error::Error>> {
         stats.add(render_time, t_present.elapsed());
         let _ = state.display_handle.flush_clients();
     }
+    state.save_session();
     Ok(())
 }
 

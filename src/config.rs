@@ -187,11 +187,13 @@ pub struct Session {
     pub dim_seconds: u32,
     /// black out the screen after this many idle seconds; 0 = never
     pub screen_off_seconds: u32,
+    /// start the programs again that were open when the last session ended
+    pub restore: bool,
 }
 
 impl Default for Session {
     fn default() -> Self {
-        Session { idle_lock_seconds: 0, workspaces: 4, dim_seconds: 300, screen_off_seconds: 600 }
+        Session { idle_lock_seconds: 0, workspaces: 4, dim_seconds: 300, screen_off_seconds: 600, restore: false }
     }
 }
 

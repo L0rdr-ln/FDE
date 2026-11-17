@@ -542,6 +542,12 @@ fn shell_page(cfg: &Config, status: &Status) -> GBox {
     let st8 = status.clone();
     corner.connect_active_notify(move |sw| st8.report(config::set(&path(), &model::hot_corner(sw.is_active()))));
     body.append(&row("Top left corner opens the overview", &corner));
+    let restore = gtk4::Switch::new();
+    restore.set_active(cfg.session.restore);
+    restore.set_halign(Align::Start);
+    let st9 = status.clone();
+    restore.connect_active_notify(move |sw| st9.report(config::set(&path(), &model::restore(sw.is_active()))));
+    body.append(&row("Reopen the programs at the next login", &restore));
     let note = Label::new(Some("The task bar starts and stops with the next session."));
     note.add_css_class("hint");
     note.set_halign(Align::Start);
