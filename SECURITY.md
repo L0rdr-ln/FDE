@@ -71,6 +71,7 @@ computer cannot connect to your XWayland (checked with a second account).
   so a program cannot fill the history or memory with one huge message.
 - Pictures that claim absurd sizes (wallpapers over 150 million pixels, icons over 2048 pixels a
   side, SVG icons over 4 MB) are refused before memory is set aside for them.
+- Any program on the session bus can put an icon and a menu in the tray. FDE limits what that can be: pictures up to 512 x 512 pixels whose bytes match their size, names and titles cut to a short length without control characters, menus of at most 40 rows, and the object paths and bus names it will talk to are checked for plain characters.
 - A window's own name can choose an icon from the icon themes, never a picture file by path.
 - A Wi-Fi network's name is never read as a command option when you connect to it.
 - The configuration is written by the settings app to a temporary file and moved into place, and

@@ -403,6 +403,8 @@ pub enum StatusKind {
     KeyboardLayout,
     Battery,
     DoNotDisturb,
+    /// an item of the system tray (its index in `tray::read_entries`); its label is "icon|title"
+    Tray(usize),
 }
 
 thread_local! {
@@ -435,6 +437,8 @@ fn status_icon_name(kind: StatusKind, label: &str) -> Option<&'static str> {
 pub const CHROME_ICON: i32 = 16;
 /// Size of the icons in the power buttons (they are narrow).
 pub const POWER_ICON: i32 = 12;
+/// Size of a system tray icon (logical pixels).
+pub const TRAY_ICON: i32 = 20;
 
 /// Width of the workspace dots (logical pixels), 0 with a single workspace.
 fn workspace_dots_width(count: usize) -> f32 {
@@ -461,6 +465,19 @@ pub fn draw_status(
     let mut right = width as f32 - (112.0 + workspace_dots_width(workspaces)) * sf;
     let mut rects = Vec::new();
     for (kind, label) in items {
+        // a tray item is only its picture
+        if let StatusKind::Tray(_) = kind {
+            let key = label.split('|').next().unwrap_or("");
+            let px = TRAY_ICON * s;
+            let icon = chrome_icon(key, px).or_else(|| chrome_icon("application-x-executable", px));
+            let x0 = right as i32 - px;
+            if let Some(i) = &icon {
+                crate::icons::blit_icon(buf, width, height, i, x0, (height - i.size) / 2, 1.0);
+            }
+            rects.push((*kind, x0 / s - 2, (x0 + px) / s + 2));
+            right = x0 as f32 - 6.0 * sf;
+            continue;
+        }
         let Some(img) = text.line(label, 220 * s, 12.5 * sf, pal.ink, Some(([255, 255, 255], 0.8)), 2 * s) else { continue };
         // a small icon before the words, where there is one
         let icon = status_icon_name(*kind, label).and_then(|n| chrome_icon(n, CHROME_ICON * s));
@@ -990,5 +1007,32 @@ mod tests {
             let (cpu, vol) = (rects[0].2 - rects[0].1, rects[1].2 - rects[1].1);
             assert!(vol >= cpu + CHROME_ICON, "the icon makes room: {cpu} vs {vol}");
         }
+    }
+
+    #[test]
+    fn a_tray_item_is_drawn_as_its_picture_and_can_be_hit() {
+        let dir = tempfile::tempdir().unwrap();
+        let icon = dir.path().join("red.png");
+        crate::tray::write_png(&icon, 32, 32, &[255u8, 0, 0, 255].repeat(32 * 32)).unwrap();
+        let mut text = TextRenderer::default();
+        let (w, h) = (900, HEIGHT);
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+        let key = format!("{}|My program", icon.display());
+        let items = vec![(StatusKind::Tray(0), key.clone()), (StatusKind::Tray(1), "no-such-icon-anywhere|Other".to_string()), (StatusKind::Cpu, "CPU 3%".to_string())];
+        let rects = draw_status(&mut text, &mut buf, w, h, 1, &items, 1);
+        assert_eq!(rects.iter().map(|r| r.0).collect::<Vec<_>>(), vec![StatusKind::Tray(0), StatusKind::Tray(1), StatusKind::Cpu], "in order, from the right");
+        let (_, x0, x1) = rects[0];
+        assert!(x1 - x0 >= TRAY_ICON && x1 - x0 <= TRAY_ICON + 8, "an icon's width: {}", x1 - x0);
+        assert!(rects[0].1 > rects[1].1 && rects[1].1 > rects[2].1, "each further left");
+        // red pixels where the first icon is
+        let red = (x0..x1).flat_map(|x| (0..h).map(move |y| (x, y))).filter(|&(x, y)| {
+            let i = ((y * w + x) * 4) as usize;
+            buf[i] > 200 && buf[i + 1] < 40 && buf[i + 3] > 200
+        }).count();
+        assert!(red > 150, "the picture is drawn: {red} red pixels");
+        // an icon that cannot be found is replaced by a stand-in, not left out
+        let (_, y0, y1) = rects[1];
+        let any = (y0..y1).flat_map(|x| (0..h).map(move |y| (x, y))).any(|(x, y)| buf[((y * w + x) * 4) as usize + 3] > 100);
+        assert!(any, "a stand-in icon");
     }
 }

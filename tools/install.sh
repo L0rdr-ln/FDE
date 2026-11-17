@@ -30,7 +30,7 @@ else root="$(cd "$here/.." && pwd)"; bin="$root/target/release"; share="$root/as
 mkdir -p "$prefix/bin" "$prefix/share/fde/wallpapers" "$prefix/share/applications" "$prefix/share/icons"
 # the icon theme (also used by GTK and Qt programs through the files FDE writes)
 rm -rf "$prefix/share/icons/FDE" && cp -r "$data/icons/FDE" "$prefix/share/icons/FDE"
-for p in fde fde-panel fde-lock fde-greeter fde-notify fde-shot fde-settings fde-music; do
+for p in fde fde-panel fde-lock fde-greeter fde-notify fde-tray fde-shot fde-settings fde-music; do
     [ -x "$bin/$p" ] && install -m 755 "$bin/$p" "$prefix/bin/$p"
 done
 install -m 755 "$here/start-fde" "$prefix/bin/start-fde" 2>/dev/null || install -m 755 "$here/../tools/start-fde" "$prefix/bin/start-fde"

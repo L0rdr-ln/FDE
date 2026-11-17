@@ -20,6 +20,8 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::{zwlr_foreign_toplevel_
 use wayland_protocols_wlr::layer_shell::v1::client::{zwlr_layer_shell_v1, zwlr_layer_surface_v1};
 
 const BTN_LEFT: u32 = 0x110;
+const BTN_RIGHT: u32 = 0x111;
+const BTN_MIDDLE: u32 = 0x112;
 
 #[derive(Default)]
 struct App {
@@ -39,6 +41,8 @@ struct App {
     task_count: usize,
     status_rects: Vec<(panel::StatusKind, i32, i32)>,
     click_status: Option<panel::StatusKind>,
+    /// a right or middle click on a tray item: (index, button)
+    click_tray: Option<(usize, u32)>,
     scroll_status: Option<(panel::StatusKind, i32)>,
     // the start menu
     menu_surface: Option<wl_surface::WlSurface>,
@@ -81,6 +85,8 @@ enum FlyoutKind {
     Network,
     Calendar,
     Notifications,
+    /// the menu of tray item `i`
+    TrayMenu(usize),
 }
 
 /// A flyout while it is open.
@@ -321,6 +327,11 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
                     app.click_task = panel::task_at(app.pointer.0, app.pointer.1, app.size.0, app.size.1, app.task_count);
                 }
             }
+            wl_pointer::Event::Button { button, state: WEnum::Value(wl_pointer::ButtonState::Pressed), .. } if (button == BTN_RIGHT || button == BTN_MIDDLE) && !app.pointer_on_menu && !app.pointer_on_flyout => {
+                if let Some(panel::StatusKind::Tray(i)) = status_at(app) {
+                    app.click_tray = Some((i, button));
+                }
+            }
             wl_pointer::Event::Button { state: WEnum::Value(wl_pointer::ButtonState::Released), .. } => {
                 app.flyout_dragging = false;
             }
@@ -332,6 +343,43 @@ impl Dispatch<wl_pointer::WlPointer, ()> for App {
             }
             _ => {}
         }
+    }
+}
+
+/// Click tray item `i` (`action`: activate, secondary or context) through `fde-tray`, which is
+/// installed next to the task bar.
+fn tray_click(entries: &[fde::tray::Entry], i: usize, action: &str, x: i32) {
+    let Some(e) = entries.get(i) else { return };
+    let exe = std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("fde-tray")));
+    let Some(exe) = exe.filter(|p| p.exists()) else { return };
+    let action = if action == "activate" && e.is_menu { "context" } else { action };
+    if let Ok(mut child) = Command::new(exe).args([action, &e.item.service, &e.item.path, &x.to_string(), "0"]).spawn() {
+        // reaped in the background (a click is short)
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
+}
+
+/// `fde-tray`, installed next to the task bar.
+fn tray_exe() -> Option<std::path::PathBuf> {
+    std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("fde-tray"))).filter(|p| p.exists())
+}
+
+/// The menu of tray item `e` as rows (empty if it does not answer).
+fn tray_menu_rows(e: &fde::tray::Entry) -> Vec<fde::tray::MenuRow> {
+    let Some(exe) = tray_exe() else { return Vec::new() };
+    let out = Command::new(exe).args(["menu", &e.item.service, &e.menu]).output();
+    out.ok().filter(|o| o.status.success()).map(|o| fde::tray::menu_from_text(&String::from_utf8_lossy(&o.stdout))).unwrap_or_default()
+}
+
+/// Tell tray item `i` that its menu entry `id` was chosen.
+fn tray_menu_event(entries: &[fde::tray::Entry], i: usize, id: i32) {
+    let (Some(e), Some(exe)) = (entries.get(i), tray_exe()) else { return };
+    if let Ok(mut child) = Command::new(exe).args(["event", &e.item.service, &e.menu, &id.to_string()]).spawn() {
+        std::thread::spawn(move || {
+            let _ = child.wait();
+        });
     }
 }
 
@@ -639,6 +687,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut shown_ws: Option<(usize, usize)> = None;
     let mut shown_status: Vec<(panel::StatusKind, String)> = Vec::new();
     let mut status_checked = std::time::Instant::now() - Duration::from_secs(10);
+    // the system tray (what fde-tray wrote), looked at every second
+    let mut tray_entries: Vec<fde::tray::Entry> = Vec::new();
+    let mut tray_checked = std::time::Instant::now() - Duration::from_secs(10);
     let mut shown_scale = 1;
     let mut last_clock = Instant::now() - Duration::from_secs(60);
     let mut current_clock = String::new();
@@ -654,6 +705,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // flyouts: how long the pointer has rested on a window button, and the Wi-Fi list being fetched
     let mut tip_since: Option<(usize, Instant)> = None;
     let wifi_inbox: Arc<Mutex<Option<Vec<fde::status::WifiNet>>>> = Arc::default();
+    let tray_menu_inbox: Arc<Mutex<Option<Vec<fde::tray::MenuRow>>>> = Arc::default();
 
     let mut pinned: Vec<String> = fde::config::Config::load().map(|c| c.shell.pinned).unwrap_or_default();
     let mut pinned_checked = Instant::now();
@@ -731,6 +783,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 panel::StatusKind::Network => want = Some((FlyoutKind::Network, center(kind))),
                 panel::StatusKind::KeyboardLayout => fde::kblayout::request_next(),
                 panel::StatusKind::Battery => {}
+                panel::StatusKind::Tray(i) => match tray_entries.get(i) {
+                    // an item that is only a menu opens it
+                    Some(e) if e.is_menu && !e.menu.is_empty() => want = Some((FlyoutKind::TrayMenu(i), center(kind))),
+                    _ => tray_click(&tray_entries, i, "activate", center(kind)),
+                },
+            }
+        }
+        if let Some((i, button)) = app.click_tray.take() {
+            let x = app.status_rects.iter().find(|(k, _, _)| *k == panel::StatusKind::Tray(i)).map(|(_, x0, x1)| (x0 + x1) / 2).unwrap_or(0);
+            match tray_entries.get(i) {
+                // right click: the item's menu, drawn here (programs that have none are asked to show theirs)
+                Some(e) if button == BTN_RIGHT && !e.menu.is_empty() => want = Some((FlyoutKind::TrayMenu(i), x)),
+                _ => tray_click(&tray_entries, i, if button == BTN_RIGHT { "context" } else { "secondary" }, x),
             }
         }
         if let Some((kind, delta)) = app.scroll_status.take() {
@@ -759,6 +824,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(b) = fde::status::battery() {
                 status_now.push((panel::StatusKind::Battery, fde::status::battery_label(b)));
             }
+        }
+        // the tray icons, right of the labels
+        if tray_checked.elapsed() >= Duration::from_secs(1) {
+            tray_checked = std::time::Instant::now();
+            tray_entries = fde::tray::read_entries();
+        }
+        status_now.retain(|(k, _)| !matches!(k, panel::StatusKind::Tray(_)));
+        for (i, e) in tray_entries.iter().enumerate().rev() {
+            status_now.insert(0, (panel::StatusKind::Tray(i), format!("{}|{}", e.icon, e.title)));
         }
         // the keyboard layout: a tiny file, looked at every round so a switch shows at once
         status_now.retain(|(k, _)| *k != panel::StatusKind::KeyboardLayout);
@@ -952,6 +1026,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             fde::status::open_network_settings(&terminal());
                             close = true;
                         }
+                        (Flyout::Menu { rows }, Hit::MenuRow(i)) => {
+                            if let (Some(row), FlyoutKind::TrayMenu(idx)) = (rows.as_ref().and_then(|r| r.get(i)), f.kind) {
+                                tray_menu_event(&tray_entries, idx, row.id);
+                                close = true;
+                            }
+                        }
                         (Flyout::Notifications { dnd, .. }, Hit::Dnd) => {
                             fde::notify::set_dnd(!*dnd);
                             *dnd = fde::notify::dnd_on();
@@ -982,6 +1062,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(Flyout::Network { networks, .. }) = app.flyout.as_mut().map(|f| &mut f.content) {
                     *networks = Some(list);
                     app.flyout.as_mut().map(|f| f.dirty = true);
+                }
+            }
+            // a tray menu arrived
+            if let Some(rows) = tray_menu_inbox.lock().ok().and_then(|mut g| g.take()) {
+                if let Some(f) = app.flyout.as_mut() {
+                    if let Flyout::Menu { rows: slot } = &mut f.content {
+                        *slot = Some(rows);
+                        f.dirty = true;
+                    }
                 }
             }
             // the volume may be changed elsewhere
@@ -1079,6 +1168,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         FlyoutKind::Calendar => {
                             let t = flyout::today();
                             Flyout::Calendar { year: t.0, month: t.1, today: t }
+                        }
+                        FlyoutKind::TrayMenu(i) => {
+                            if let Ok(mut g) = tray_menu_inbox.lock() {
+                                *g = None;
+                            }
+                            if let Some(e) = tray_entries.get(i).cloned() {
+                                let inbox = tray_menu_inbox.clone();
+                                std::thread::spawn(move || {
+                                    let rows = tray_menu_rows(&e);
+                                    if let Ok(mut g) = inbox.lock() {
+                                        *g = Some(rows);
+                                    }
+                                });
+                            }
+                            Flyout::Menu { rows: None }
                         }
                         FlyoutKind::Notifications => {
                             fde::notify::mark_seen();

@@ -2729,8 +2729,10 @@ fn every_theme_changes_how_a_window_is_drawn() {
     assert!(orange[0] > orange[2] + 40, "dorific's title bar is warm: {orange:?}");
     let cyan = &bars[5];
     assert!(cyan[2] > cyan[0] && cyan[1] > cyan[0], "aqua's title bar is cyan: {cyan:?}");
+    // eco's glass is tinted green: greener than aero's blue one, whatever picture lies behind it
     let green = &bars[2];
-    assert!(green[1] > green[0] && green[1] > green[2], "eco's title bar is green: {green:?}");
+    let tilt = |c: &[i32; 3]| c[1] - (c[0] + c[2]) / 2;
+    assert!(tilt(green) > tilt(&bars[0]) + 10, "eco's title bar is greener than aero's: {green:?} against {:?}", bars[0]);
 }
 
 // ------------------------------------------------------------------ primary selection

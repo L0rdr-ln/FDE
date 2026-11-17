@@ -43,7 +43,8 @@ is the first thing to do (see "Next").
 - [x] notification history (task bar flyout), volume / Wi-Fi / calendar flyouts, window previews as tooltips
 - [x] laptop keys: volume, brightness, media; the screen dims and goes black when idle (no DPMS yet)
 - [x] pinned programs and one task bar button per program
-- [ ] system tray (StatusNotifierItem), network and Bluetooth status, an on-screen display
+- [x] system tray (StatusNotifierItem, with the programs' dbusmenu menus)
+- [ ] Bluetooth status, an on-screen display
 - [~] a greeter (greetd): `fde-greeter`, tested against a stand-in greetd only
 
 ## Desktop suite

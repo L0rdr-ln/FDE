@@ -46,6 +46,7 @@ pub mod status;
 pub mod state;
 pub mod switcher;
 pub mod text;
+pub mod tray;
 pub mod theme;
 pub mod tiling;
 pub mod wallpaper;

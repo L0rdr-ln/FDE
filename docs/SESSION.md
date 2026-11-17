@@ -7,7 +7,7 @@ When the compositor starts the session it
   so that services started by the bus, like the screen-sharing portal, find the display;
 - starts a polkit authentication agent if one is installed (`policykit-1-gnome` and friends; turn off with
   `shell.polkit_agent = false` or `FDE_NO_POLKIT=1`), so programs can ask for an administrator password;
-- starts the task bar, the notification daemon, the music player if switched on, and your autostart programs.
+- starts the task bar, the notification daemon, the system tray (`FDE_NO_TRAY=1` skips it), the music player if switched on, and your autostart programs.
 
 ## Screen sharing and screenshots in programs
 

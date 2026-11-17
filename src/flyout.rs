@@ -27,6 +27,8 @@ pub enum Flyout {
     /// the month shown, and today's date (year, month, day)
     Calendar { year: i32, month: u32, today: (i32, u32, u32) },
     Notifications { items: Vec<HistoryItem>, dnd: bool },
+    /// a tray item's menu; None while it is being fetched
+    Menu { rows: Option<Vec<crate::tray::MenuRow>> },
 }
 
 /// What is under a point of a flyout.
@@ -43,6 +45,8 @@ pub enum Hit {
     CalToday,
     ClearAll,
     Dnd,
+    /// a row of a tray item's menu (an index into the rows)
+    MenuRow(usize),
 }
 
 const PAD: i32 = 14;
@@ -113,8 +117,35 @@ fn shown_rows(f: &Flyout) -> usize {
 }
 
 /// The size of the flyout in logical pixels (`text` measures a tooltip's lines at scale `s`).
+/// Menu rows shown at most (the rest is cut), the menu's width, and the height of a row and of a
+/// separator.
+pub const MAX_MENU: usize = 16;
+pub const MENU_W: i32 = 260;
+pub const MENU_ROW: i32 = 26;
+pub const MENU_SEP: i32 = 9;
+
+fn menu_row_height(r: &crate::tray::MenuRow) -> i32 {
+    if r.separator { MENU_SEP } else { MENU_ROW }
+}
+
+/// Top of menu row `i` (the menu has a little room at the top).
+fn menu_row_top(rows: &[crate::tray::MenuRow], i: usize) -> i32 {
+    8 + rows.iter().take(i).map(menu_row_height).sum::<i32>()
+}
+
+fn menu_rows(f: &Flyout) -> &[crate::tray::MenuRow] {
+    match f {
+        Flyout::Menu { rows: Some(r) } => &r[..r.len().min(MAX_MENU)],
+        _ => &[],
+    }
+}
+
 pub fn size(f: &Flyout, text: &mut TextRenderer, s: i32) -> (i32, i32) {
     match f {
+        Flyout::Menu { .. } => {
+            let rows = menu_rows(f);
+            (MENU_W, if rows.is_empty() { 8 + MENU_ROW + 8 } else { menu_row_top(rows, rows.len()) + 8 })
+        }
         Flyout::Tooltip(lines) => {
             let widest = lines.iter().filter_map(|l| text.line(l, 420 * s, 13.0 * s as f32, [0, 0, 0], None, 0)).map(|i| i.width).max().unwrap_or(40 * s);
             (widest / s + 2 * PAD + 10, lines.len().max(1) as i32 * 20 + 14)
@@ -182,10 +213,21 @@ pub fn hit(f: &Flyout, x: f64, y: f64) -> Hit {
             Flyout::Network { .. } => (270, 0),
             Flyout::Calendar { .. } => (252, 0),
             Flyout::Notifications { .. } => (330, 0),
+            Flyout::Menu { .. } => (MENU_W, 0),
             Flyout::Tooltip(_) => return Hit::None,
         }
     };
     match f {
+        Flyout::Menu { .. } => {
+            let rows = menu_rows(f);
+            for (i, r) in rows.iter().enumerate() {
+                let top = menu_row_top(rows, i);
+                if !r.separator && r.enabled && !r.has_children && x >= 4.0 && x < (w - 4) as f64 && y >= top as f64 && y < (top + menu_row_height(r)) as f64 {
+                    return Hit::MenuRow(i);
+                }
+            }
+            Hit::None
+        }
         Flyout::Volume { .. } => {
             let r = slider_rect(w);
             if inside((r.0 - 6, r.1 - 8, r.2 + 6, r.3 + 8), x, y) {
@@ -341,6 +383,37 @@ pub fn draw(f: &Flyout, text: &mut TextRenderer, s: i32, hover: Hit) -> Vec<u8> 
     let soft = [(ink[0] as u32 / 2 + 60).min(255) as u8, (ink[1] as u32 / 2 + 70).min(255) as u8, (ink[2] as u32 / 2 + 80).min(255) as u8];
     glass(&mut buf, w, h, s);
     match f {
+        Flyout::Menu { rows } => match rows {
+            None => {
+                label(text, &mut buf, w, h, s, "Loading…", PAD, 8 + MENU_ROW / 2, 13.0, soft, lw - 2 * PAD);
+            }
+            Some(r) if r.is_empty() => {
+                label(text, &mut buf, w, h, s, "This program has no menu", PAD, 8 + MENU_ROW / 2, 13.0, soft, lw - 2 * PAD);
+            }
+            Some(_) => {
+                let rows = menu_rows(f);
+                for (i, r) in rows.iter().enumerate() {
+                    let top = menu_row_top(rows, i);
+                    let mid = top + menu_row_height(r) / 2;
+                    if r.separator {
+                        fill_box(&mut buf, w, h, scaled((PAD, mid, lw - PAD, mid + 1), s), 0.0, s, |_| (pal.dark(0.5), 0.35), 0.0, pal.dark(0.5));
+                        continue;
+                    }
+                    if hover == Hit::MenuRow(i) {
+                        fill_box(&mut buf, w, h, scaled((4, top, lw - 4, top + MENU_ROW), s), 4.0 * s as f32, s, |t| ([0.86 - 0.06 * t, 0.93 - 0.04 * t, 1.0], 0.95), 0.0, [0.45, 0.65, 0.9]);
+                    }
+                    let indent = PAD + 14 + r.depth as i32 * 14;
+                    let color = if r.enabled { ink } else { soft };
+                    if r.checked {
+                        label(text, &mut buf, w, h, s, "✓", 6, mid, 13.0, color, 22);
+                    }
+                    label(text, &mut buf, w, h, s, &r.label, indent, mid, 13.0, color, lw - indent - PAD - if r.has_children { 14 } else { 0 });
+                    if r.has_children {
+                        label(text, &mut buf, w, h, s, "▸", lw - PAD - 10, mid, 12.0, soft, 14);
+                    }
+                }
+            }
+        },
         Flyout::Tooltip(lines) => {
             for (i, l) in lines.iter().enumerate() {
                 label(text, &mut buf, w, h, s, l, PAD, 17 + i as i32 * 20, 13.0, ink, lw - 2 * PAD);
@@ -559,5 +632,34 @@ mod tests {
         let low = draw(&Flyout::Volume { percent: 10, muted: false }, &mut text, 1, Hit::None);
         let high = draw(&Flyout::Volume { percent: 90, muted: false }, &mut text, 1, Hit::None);
         assert_ne!(low, high);
+    }
+
+    #[test]
+    fn a_tray_menu_is_sized_by_its_rows_and_its_enabled_rows_can_be_hit() {
+        use crate::tray::MenuRow;
+        let row = |id: i32, label: &str, enabled: bool, separator: bool, has_children: bool| MenuRow { id, label: label.into(), enabled, separator, checked: id == 3, depth: 0, has_children };
+        let rows = vec![row(1, "Open", true, false, false), row(2, "", true, true, false), row(3, "Mute", true, false, false), row(4, "More", true, false, true), row(5, "Greyed", false, false, false)];
+        let f = Flyout::Menu { rows: Some(rows.clone()) };
+        let mut text = TextRenderer::default();
+        let (w, h) = size(&f, &mut text, 1);
+        assert_eq!(w, MENU_W);
+        assert_eq!(h, 8 + 3 * MENU_ROW + MENU_SEP + MENU_ROW + 8, "rows and one separator");
+        // each row is found by its place; the separator, the submenu header and the greyed row are not buttons
+        let top = |i: usize| menu_row_top(&rows, i) as f64 + 3.0;
+        assert_eq!(hit(&f, 40.0, top(0)), Hit::MenuRow(0));
+        assert_eq!(hit(&f, 40.0, top(1)), Hit::None, "separator");
+        assert_eq!(hit(&f, 40.0, top(2)), Hit::MenuRow(2));
+        assert_eq!(hit(&f, 40.0, top(3)), Hit::None, "a submenu header does nothing");
+        assert_eq!(hit(&f, 40.0, top(4)), Hit::None, "greyed");
+        assert_eq!(hit(&f, 2.0, top(0)), Hit::None, "outside");
+        // loading and empty menus have a size too and nothing to hit
+        assert_eq!(size(&Flyout::Menu { rows: None }, &mut text, 1).1, 8 + MENU_ROW + 8);
+        assert_eq!(hit(&Flyout::Menu { rows: None }, 40.0, 20.0), Hit::None);
+        // it draws (and `FDE_FLYOUT_SHEET=<file.png>` writes the picture)
+        let px = draw(&f, &mut text, 1, Hit::MenuRow(0));
+        assert_eq!(px.len(), (w * h * 4) as usize);
+        if let Some(out) = std::env::var_os("FDE_FLYOUT_SHEET") {
+            crate::demo::write_png(out.to_str().unwrap(), &px, w, h, false).unwrap();
+        }
     }
 }

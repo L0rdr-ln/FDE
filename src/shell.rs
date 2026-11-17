@@ -81,6 +81,10 @@ pub fn start_other_clients(config: &crate::config::Config) {
     if std::env::var_os("FDE_NO_NOTIFY").is_none() && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() {
         start_sibling("fde-notify");
     }
+    // the system tray (a StatusNotifierWatcher on the session bus)
+    if std::env::var_os("FDE_NO_TRAY").is_none() && std::env::var_os("DBUS_SESSION_BUS_ADDRESS").is_some() {
+        start_sibling("fde-tray");
+    }
     // background music, if switched on
     if config.music.enabled && std::env::var_os("FDE_NO_MUSIC").is_none() {
         start_sibling("fde-music");
