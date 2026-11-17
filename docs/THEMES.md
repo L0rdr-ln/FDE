@@ -118,3 +118,7 @@ common names (terminal, file manager, folders, browser, mail, settings, lock, lo
 network, volume, battery, dialogs, file types and the application categories). Programs' own icons win; the FDE
 icons come before Adwaita for everything else. `python3 tools/make-icons.py` draws them again (the SVGs are kept in
 the repository, so nothing needs building).
+
+The shell uses the icons too: the power buttons of the start menu (lock, log out, sleep, restart, shut down), the
+volume, network and battery items of the task bar, and the notification bubbles, which show the icon the program
+sent (a dialog icon when it sent none: information, or error for critical ones).

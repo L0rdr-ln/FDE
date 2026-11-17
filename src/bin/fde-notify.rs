@@ -45,7 +45,7 @@ impl Server {
         &self,
         app_name: String,
         replaces_id: u32,
-        _app_icon: String,
+        app_icon: String,
         summary: String,
         body: String,
         actions: Vec<String>,
@@ -60,7 +60,10 @@ impl Server {
         if replaces_id == 0 {
             notify::add_history(&app_name, &notify::strip_markup(&summary), &notify::strip_markup(&body));
         }
-        self.shared.lock().unwrap().store.notify(&app_name, replaces_id, &summary, &body, expire_timeout, critical, &actions, Instant::now())
+        let mut shared = self.shared.lock().unwrap();
+        let id = shared.store.notify(&app_name, replaces_id, &summary, &body, expire_timeout, critical, &actions, Instant::now());
+        shared.store.set_icon(id, &app_icon);
+        id
     }
 
     fn close_notification(&self, id: u32) {

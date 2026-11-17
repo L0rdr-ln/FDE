@@ -20,6 +20,8 @@ pub struct Note {
     /// when it goes away; None = stays until dismissed
     pub expires: Option<std::time::Instant>,
     pub critical: bool,
+    /// the program's icon: a name from the icon themes or the path of a PNG or SVG (may be empty)
+    pub icon: String,
     /// (key, label) pairs the program offered; "default" is what clicking the bubble does
     pub actions: Vec<(String, String)>,
 }
@@ -53,7 +55,7 @@ impl Store {
         };
         let strip = |s: &str| strip_markup(s);
         let pairs: Vec<(String, String)> = actions.chunks_exact(2).map(|c| (c[0].clone(), strip(&c[1]))).collect();
-        let note = |id| Note { id, app: app.to_string(), summary: strip(summary), body: strip(body), expires, critical, actions: pairs.clone() };
+        let note = |id| Note { id, app: app.to_string(), summary: strip(summary), body: strip(body), expires, critical, icon: String::new(), actions: pairs.clone() };
         if replaces != 0 {
             if let Some(n) = self.notes.iter_mut().find(|n| n.id == replaces) {
                 *n = note(replaces);
@@ -199,6 +201,26 @@ fn now_secs() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
+/// What an icon name from a program may be: a plain name, or the path of a PNG or SVG file.
+pub fn clean_icon(name: &str) -> String {
+    let n: String = name.chars().take(200).collect();
+    let ok_name = !n.is_empty() && !n.contains('/') && !n.contains("..") && n.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+'));
+    let ok_path = n.starts_with('/') && !n.contains("..") && (n.ends_with(".png") || n.ends_with(".svg"));
+    if ok_name || ok_path { n } else { String::new() }
+}
+
+impl Store {
+    /// Say which icon a note shows (after `notify` gave its id).
+    pub fn set_icon(&mut self, id: u32, icon: &str) {
+        if let Some(n) = self.notes.iter_mut().find(|n| n.id == id) {
+            n.icon = clean_icon(icon);
+        }
+    }
+}
+
+/// Size of the icon in a bubble (logical pixels).
+pub const ICON: i32 = 32;
+
 /// `text` cut to at most `max` characters.
 pub fn clip(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
@@ -325,16 +347,23 @@ pub fn draw(text: &mut TextRenderer, s: i32, notes: &[&Note]) -> Vec<u8> {
                 }
             }
         }
+        // the program's icon at the left (a dialog icon when it sent none or it cannot be found)
+        let fallback: &[&str] = if note.critical { &["dialog-error"] } else { &["dialog-information"] };
+        let icon = crate::icons::cached(&note.icon, ICON * s, fallback);
+        let indent = if icon.is_some() { ICON + 10 } else { 0 };
+        if let Some(i) = &icon {
+            crate::icons::blit_icon(&mut buf, w, h, i, 14 * s, y0 + (BUBBLE_H - ICON) * s / 2 - 2 * s, 1.0);
+        }
         let ink = if note.critical { [95, 12, 6] } else { pal.ink };
         let soft = [(ink[0] as u32 * 3 / 4 + 40) as u8, (ink[1] as u32 * 3 / 4 + 45) as u8, (ink[2] as u32 * 3 / 4 + 55) as u8];
-        if let Some(img) = text.line(&note.summary, w - 32 * s, 15.0 * sf, ink, Some(([255, 255, 255], 0.9)), 2 * s) {
-            blit(&mut buf, w, h, &img, 16 * s, y0 + 12 * s);
+        if let Some(img) = text.line(&note.summary, w - (32 + indent) * s, 15.0 * sf, ink, Some(([255, 255, 255], 0.9)), 2 * s) {
+            blit(&mut buf, w, h, &img, (16 + indent) * s, y0 + 12 * s);
         }
         // the message: on two lines when there are no buttons below it
-        let lines = if note.buttons().is_empty() { wrap(text, &note.body, w - 32 * s, 13.0 * sf, 2) } else { vec![note.body.clone()] };
+        let lines = if note.buttons().is_empty() { wrap(text, &note.body, w - (32 + indent) * s, 13.0 * sf, 2) } else { vec![note.body.clone()] };
         for (li, line) in lines.iter().enumerate() {
-            if let Some(img) = text.line(line, w - 32 * s, 13.0 * sf, soft, Some(([255, 255, 255], 0.8)), 2 * s) {
-                blit(&mut buf, w, h, &img, 16 * s, y0 + (38 + 18 * li as i32) * s);
+            if let Some(img) = text.line(line, w - (32 + indent) * s, 13.0 * sf, soft, Some(([255, 255, 255], 0.8)), 2 * s) {
+                blit(&mut buf, w, h, &img, (16 + indent) * s, y0 + (38 + 18 * li as i32) * s);
             }
         }
         // the buttons the program asked for
@@ -528,5 +557,42 @@ mod tests {
         assert_eq!(clip("häßlich", 3), "häß");
         assert_eq!(clip("ok", 200), "ok");
         assert_eq!(clip(&"x".repeat(5000), 1000).len(), 1000);
+    }
+
+    #[test]
+    fn icon_names_from_programs_are_cleaned() {
+        assert_eq!(clean_icon("firefox"), "firefox");
+        assert_eq!(clean_icon("dialog-information"), "dialog-information");
+        assert_eq!(clean_icon("/usr/share/pixmaps/x.png"), "/usr/share/pixmaps/x.png");
+        assert_eq!(clean_icon("/etc/passwd"), "", "only pictures");
+        assert_eq!(clean_icon("../../etc/x.png"), "");
+        assert_eq!(clean_icon("a/b"), "");
+        assert_eq!(clean_icon(""), "");
+        assert_eq!(clean_icon("naïve"), "");
+        assert_eq!(clean_icon(&"a".repeat(500)).len(), 200);
+    }
+
+    #[test]
+    fn a_bubble_shows_its_icon_and_the_text_moves_over() {
+        let mut store = Store::default();
+        let now = std::time::Instant::now();
+        let id = store.notify("App", 0, "Hello", "A message that is long enough to need the width it has", 5000, false, &[], now);
+        let plain = store.notes[0].clone();
+        assert_eq!(plain.icon, "");
+        store.set_icon(id, "dialog-warning");
+        assert_eq!(store.notes[0].icon, "dialog-warning");
+        store.set_icon(id, "/etc/passwd");
+        assert_eq!(store.notes[0].icon, "", "a path that is not a picture is dropped");
+        store.set_icon(id, "dialog-warning");
+        let mut text = TextRenderer::default();
+        let with = draw(&mut text, 1, &[&store.notes[0]]);
+        let (w, _) = size(1);
+        // the warning triangle is amber: some pixel in the icon's place is orange
+        let at = |x: i32, y: i32| {
+            let i = ((y * w + x) * 4) as usize;
+            [with[i] as i32, with[i + 1] as i32, with[i + 2] as i32, with[i + 3] as i32]
+        };
+        let amber = (14..14 + ICON).any(|x| (20..20 + ICON).any(|y| { let p = at(x, y); p[0] > 200 && p[1] > 120 && p[1] < 190 && p[2] < 90 }));
+        assert!(amber, "the icon is drawn at the left");
     }
 }

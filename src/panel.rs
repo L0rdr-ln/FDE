@@ -405,6 +405,37 @@ pub enum StatusKind {
     DoNotDisturb,
 }
 
+thread_local! {
+    static CHROME_ICONS: std::cell::RefCell<crate::icons::IconCache> = std::cell::RefCell::new(crate::icons::IconCache::default());
+}
+
+/// A small icon for the shell's own buttons and labels (looked up once per size).
+fn chrome_icon(name: &str, px: i32) -> Option<crate::icons::Icon> {
+    CHROME_ICONS.with(|c| c.borrow_mut().get(name, px, &[]).cloned())
+}
+
+/// The icon that goes with a status label, from what the label says.
+fn status_icon_name(kind: StatusKind, label: &str) -> Option<&'static str> {
+    match kind {
+        StatusKind::Volume => {
+            let l = label.to_lowercase();
+            if l.contains("mute") {
+                return Some("audio-volume-muted");
+            }
+            let pct: i32 = l.chars().filter(|c| c.is_ascii_digit()).collect::<String>().parse().unwrap_or(50);
+            Some(if pct >= 66 { "audio-volume-high" } else if pct >= 33 { "audio-volume-medium" } else { "audio-volume-low" })
+        }
+        StatusKind::Network => Some(if label.to_lowercase().starts_with("wired") { "network-wired" } else { "network-wireless" }),
+        StatusKind::Battery => Some("battery"),
+        _ => None,
+    }
+}
+
+/// Size of the icons next to status labels and in the power buttons (logical pixels).
+pub const CHROME_ICON: i32 = 16;
+/// Size of the icons in the power buttons (they are narrow).
+pub const POWER_ICON: i32 = 12;
+
 /// Width of the workspace dots (logical pixels), 0 with a single workspace.
 fn workspace_dots_width(count: usize) -> f32 {
     if count < 2 {
@@ -431,9 +462,15 @@ pub fn draw_status(
     let mut rects = Vec::new();
     for (kind, label) in items {
         let Some(img) = text.line(label, 220 * s, 12.5 * sf, pal.ink, Some(([255, 255, 255], 0.8)), 2 * s) else { continue };
-        let x0 = right as i32 - img.width;
-        blit(buf, width, height, &img, x0, (height - img.height) / 2);
-        rects.push((*kind, x0 / s, (x0 + img.width) / s));
+        // a small icon before the words, where there is one
+        let icon = status_icon_name(*kind, label).and_then(|n| chrome_icon(n, CHROME_ICON * s));
+        let icon_w = icon.as_ref().map(|i| i.size + 3 * s).unwrap_or(0);
+        let x0 = right as i32 - img.width - icon_w;
+        if let Some(i) = &icon {
+            crate::icons::blit_icon(buf, width, height, i, x0, (height - i.size) / 2, 1.0);
+        }
+        blit(buf, width, height, &img, x0 + icon_w, (height - img.height) / 2);
+        rects.push((*kind, x0 / s, (x0 + icon_w + img.width) / s));
         right = x0 as f32 - 12.0 * sf;
     }
     // the window buttons end a little before the leftmost label
@@ -442,7 +479,18 @@ pub fn draw_status(
     rects
 }
 
-pub const MENU_W: i32 = 380;
+/// The icon of a power button.
+fn power_icon_name(id: &str) -> &'static str {
+    match id {
+        "lock" => "system-lock-screen",
+        "logout" => "system-log-out",
+        "sleep" => "system-suspend",
+        "restart" => "system-reboot",
+        _ => "system-shutdown",
+    }
+}
+
+pub const MENU_W: i32 = 420;
 pub const MENU_ROW: i32 = 30;
 /// Size of the icons in the start menu (logical pixels).
 pub const MENU_ICON: i32 = 22;
@@ -629,6 +677,14 @@ pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String],
             let idx = ((ly * w + x) * 4) as usize;
             blend(&mut buf[idx..idx + 4], pal.dark(0.5), 0.30);
         }
+        // icons in the buttons only if every label still fits next to its icon (all or none)
+        let fits = crate::power::ACTIONS.iter().enumerate().all(|(i, a)| {
+            let (x0, _, x1, _) = power_rect(i);
+            let room = (x1 - x0) * s - 2 * s;
+            let ico = chrome_icon(power_icon_name(a.id), POWER_ICON * s).map(|i| i.size + 2 * s);
+            let wide = ["Sure?", a.label].iter().map(|l| text.line(l, room, 10.0 * sf, [0, 0, 0], None, 0).map(|t| t.width).unwrap_or(0)).max().unwrap_or(0);
+            ico.is_some_and(|w| w + wide <= room)
+        });
         for (i, action) in crate::power::ACTIONS.iter().enumerate() {
             let (x0, y0, x1, y1) = power_rect(i);
             let (x0, y0, x1, y1) = (x0 * s, y0 * s, x1 * s, y1 * s);
@@ -667,8 +723,17 @@ pub fn draw_menu(text: &mut TextRenderer, s: i32, query: &str, names: &[String],
             let label = if armed { "Sure?" } else { action.label };
             let color = if armed { [255, 255, 255] } else { pal.ink };
             let glow = if armed { Some(([90, 10, 5], 0.6)) } else { Some(([255, 255, 255], 0.8)) };
-            if let Some(img) = text.line(label, x1 - x0, 11.0 * sf, color, glow, s) {
-                blit(&mut buf, w, h, &img, x0 + (x1 - x0 - img.width) / 2, y0 + (y1 - y0 - img.height) / 2);
+            // a small icon before the word, when the two fit side by side in the button
+            let room = x1 - x0 - 2 * s;
+            let icon = chrome_icon(power_icon_name(action.id), POWER_ICON * s);
+            if let Some(img) = text.line(label, room, 10.0 * sf, color, glow, s) {
+                let with_icon = icon.as_ref().filter(|_| fits);
+                let icon_w = with_icon.map(|i| i.size + 2 * s).unwrap_or(0);
+                let gx = x0 + (x1 - x0 - icon_w - img.width) / 2;
+                if let Some(i) = with_icon {
+                    crate::icons::blit_icon(&mut buf, w, h, i, gx, y0 + (y1 - y0 - i.size) / 2, 1.0);
+                }
+                blit(&mut buf, w, h, &img, gx + icon_w, y0 + (y1 - y0 - img.height) / 2);
             }
         }
     }
@@ -901,5 +966,29 @@ mod tests {
         assert!((one - ORB_SIZE).abs() <= 4 && (two - 2 * ORB_SIZE).abs() <= 6, "the orb is about 32 px wide at 1x and 64 px at 2x: {one} {two}");
         let (mw, mh) = menu_size();
         assert_eq!(draw_menu(&mut text, 2, "", &[], &[], None, &PowerView::default()).len() as i32, mw * 2 * mh * 2 * 4);
+    }
+
+    #[test]
+    fn status_items_and_power_buttons_get_icons_that_fit_what_they_say() {
+        assert_eq!(status_icon_name(StatusKind::Volume, "Vol muted"), Some("audio-volume-muted"));
+        assert_eq!(status_icon_name(StatusKind::Volume, "Vol 80%"), Some("audio-volume-high"));
+        assert_eq!(status_icon_name(StatusKind::Volume, "Vol 45%"), Some("audio-volume-medium"));
+        assert_eq!(status_icon_name(StatusKind::Volume, "Vol 10%"), Some("audio-volume-low"));
+        assert_eq!(status_icon_name(StatusKind::Network, "Wired"), Some("network-wired"));
+        assert_eq!(status_icon_name(StatusKind::Network, "HomeWifi 80%"), Some("network-wireless"));
+        assert_eq!(status_icon_name(StatusKind::Cpu, "CPU 3%"), None);
+        for action in crate::power::ACTIONS {
+            assert!(chrome_icon(power_icon_name(action.id), POWER_ICON).is_some(), "an icon for {}", action.id);
+        }
+        // an item with an icon is wider than the same label without one
+        let mut text = TextRenderer::default();
+        let (w, h) = (900, HEIGHT);
+        let mut buf = vec![0u8; (w * h * 4) as usize];
+        let items = vec![(StatusKind::Cpu, "CPU 3%".to_string()), (StatusKind::Volume, "CPU 3%".to_string())];
+        let rects = draw_status(&mut text, &mut buf, w, h, 1, &items, 1);
+        if rects.len() == 2 {
+            let (cpu, vol) = (rects[0].2 - rects[0].1, rects[1].2 - rects[1].1);
+            assert!(vol >= cpu + CHROME_ICON, "the icon makes room: {cpu} vs {vol}");
+        }
     }
 }

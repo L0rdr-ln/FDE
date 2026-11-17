@@ -54,7 +54,8 @@ is the first thing to do (see "Next").
 - [ ] theme pictures for the wallpapers (the folder and the licence rules are ready:
       `assets/wallpapers/README.md`; only free-to-use pictures)
 - [ ] the mascot picture (brief and prompt: `docs/MASCOT.md`)
-- [ ] GTK4 and Qt styling to match, an icon theme, sounds
+- [x] GTK4 / GTK3 and Qt styling from the theme, an icon theme of its own (about 130 icons)
+- [ ] sounds
 - [ ] file manager, a portal backend of its own, installer / one-command setup
 - [ ] packaging (Debian / Arch), accessibility basics (high contrast, screen reader)
 

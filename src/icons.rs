@@ -102,6 +102,16 @@ pub fn find_in(dirs: &[PathBuf], name: &str, px: i32) -> Option<PathBuf> {
     None
 }
 
+thread_local! {
+    static SHARED: std::cell::RefCell<IconCache> = std::cell::RefCell::new(IconCache::default());
+}
+
+/// Icon `name` (or the first of `fallbacks` that exists) at `px` pixels, from a cache shared by the
+/// program's drawing code (one per thread).
+pub fn cached(name: &str, px: i32, fallbacks: &[&str]) -> Option<Icon> {
+    SHARED.with(|c| c.borrow_mut().get(name, px, fallbacks).cloned())
+}
+
 /// Read an icon file (PNG or SVG) as a `px` x `px` picture.
 pub fn load(path: &Path, px: i32) -> Option<Icon> {
     let px = px.max(1);
