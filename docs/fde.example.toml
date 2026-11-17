@@ -81,3 +81,23 @@ night_light_to = "07:00"
 trusted_programs = ["grim", "wf-recorder", "wl-screenrec", "xdg-desktop-portal-wlr", "swaylock", "waylock", "obs", "waybar", "nwg-panel",
     "fuzzel", "wofi", "rofi", "tofi", "bemenu", "bemenu-run", "nwg-drawer", "wlogout", "mako", "dunst", "swaync"]
 restrict = true
+
+# Window rules: settings for windows of certain programs, applied when a window first shows its
+# picture. A rule needs app_id (the program's app id; X11: its class) or title, `*` and `?` match
+# anything, case does not matter. All rules that match apply, later ones win.
+#
+# [[rules]]
+# app_id = "pavucontrol"
+# float = true            # stays out of the tiling layout
+# size = [700, 500]       # the program's own size, without the frame
+# center = true           # in the middle of the monitor
+#
+# [[rules]]
+# title = "*Picture-in-Picture*"
+# on_top = true
+# workspace = 3           # opens on workspace 3 (1 to 32)
+#
+# [[rules]]
+# app_id = "org.gnome.Calculator"
+# position = [40, 60]     # top left corner of the window with its frame, on the first monitor
+# maximize = false

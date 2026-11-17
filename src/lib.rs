@@ -37,6 +37,7 @@ pub mod power;
 pub mod protocols;
 pub mod redraw;
 pub mod render;
+pub mod rules;
 pub mod screencopy;
 pub mod security;
 pub mod selftest;

@@ -239,6 +239,8 @@ pub struct Config {
     pub session: Session,
     pub display: Display,
     pub security: Security,
+    /// settings for windows of certain programs (`[[rules]]`, see rules.rs)
+    pub rules: Vec<crate::rules::WindowRule>,
     /// which of accent, transparency, blur, gloss the user's files set (they win over the theme)
     #[serde(skip)]
     pub explicit: Vec<String>,
@@ -296,6 +298,9 @@ impl Config {
     }
 
     fn validate(&self) -> Result<(), String> {
+        for (i, r) in self.rules.iter().enumerate() {
+            r.check().map_err(|e| format!("rules[{}]: {e}", i + 1))?;
+        }
         let d = &self.display;
         if !(1200..=6500).contains(&d.night_light_temperature) {
             return Err("display.night_light_temperature must be between 1200 and 6500".into());

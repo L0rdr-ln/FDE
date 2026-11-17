@@ -394,6 +394,59 @@ impl Fde {
         self.space.elements().find(|w| w.x11_surface().is_some_and(|s| s.window_id() == id)).cloned()
     }
 
+    /// Apply the `[[rules]]` that match the window (by its app id and title now). True if they
+    /// placed it (size, position or centring).
+    pub fn apply_window_rules(&mut self, window: &Window) -> bool {
+        if self.config.rules.is_empty() {
+            return false;
+        }
+        let app = crate::placement::app_id(window).unwrap_or_default();
+        let title = self.window_title(window);
+        let o = crate::rules::combine(&crate::rules::matching(&self.config.rules, &app, &title));
+        if o == crate::rules::Outcome::default() {
+            return false;
+        }
+        if let Some(f) = o.float {
+            info(window).lock().unwrap().floating = f;
+        }
+        if let Some(on) = o.on_top {
+            self.set_on_top(window, on);
+        }
+        if o.maximize == Some(true) {
+            self.set_maximized(window, true);
+        }
+        let mut placed = false;
+        let wants_place = o.size.is_some() || o.position.is_some() || o.center == Some(true);
+        if wants_place && o.maximize != Some(true) && !self.is_fullscreen(window) && !self.is_override_redirect(window) {
+            if let Some(g) = self.space.element_geometry(window) {
+                let style = self.frame_style(window);
+                let out = self.output_for_window(window);
+                let (area, monitor) = (self.usable_area(&out), self.output_rect(&out));
+                let size = o.size.map(|[w, h]| (w, h)).unwrap_or((g.size.w, g.size.h));
+                let outer_size = outer_rect(Rectangle::new(g.loc, size.into()), &style).size;
+                let loc: Point<i32, Logical> = if o.center == Some(true) {
+                    (area.loc.x + (area.size.w - outer_size.w) / 2, area.loc.y + (area.size.h - outer_size.h) / 2).into()
+                } else if let Some([x, y]) = o.position {
+                    (monitor.loc.x + x, monitor.loc.y + y).into()
+                } else {
+                    outer_rect(g, &style).loc
+                };
+                // never wholly off the usable area
+                let x = loc.x.min(area.loc.x + area.size.w - outer_size.w).max(area.loc.x);
+                let y = loc.y.min(area.loc.y + area.size.h - outer_size.h).max(area.loc.y);
+                let outer = Rectangle::new((x, y).into(), outer_size);
+                self.place_client(window, client_rect(outer, &style));
+                placed = true;
+            }
+        }
+        if let Some(n) = o.workspace {
+            if n >= 1 && n - 1 != self.workspace {
+                self.move_window_to_workspace(window, n - 1);
+            }
+        }
+        placed
+    }
+
     /// A new window has drawn its first picture: if it hangs over the edge of the usable area
     /// from where it was cascaded, move it in (to the top left corner if it is bigger than all).
     pub fn fit_new_window(&mut self, window: &Window) {
@@ -405,6 +458,10 @@ impl Fde {
             return; // no picture yet
         }
         info(window).lock().unwrap().fitted = true;
+        // the rules of the configuration (`[[rules]]`); one that places the window ends the fitting
+        if self.apply_window_rules(window) {
+            return;
+        }
         // the layout places tiled windows
         if self.tiling_on() && self.tileable(window) {
             return;

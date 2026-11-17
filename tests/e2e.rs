@@ -2017,6 +2017,94 @@ fn the_overview_survives_windows_closing_under_it() {
 }
 
 #[test]
+fn window_rules_size_place_float_and_send_windows_by_what_they_are() {
+    use fde::rules::WindowRule;
+    let dir = tempfile::tempdir().unwrap();
+    let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::set_var("XDG_RUNTIME_DIR", dir.path());
+    std::env::set_var("XDG_STATE_HOME", dir.path().join("state"));
+    let display: Display<Fde> = Display::new().unwrap();
+    let mut state = Fde::new(&display.handle(), (1000, 700).into());
+    state.config.appearance.animations = false;
+    state.config.shell.remember_windows = false;
+    state.config.rules = vec![
+        WindowRule { app_id: "org.example.Float*".into(), float: Some(true), size: Some([500, 300]), center: Some(true), ..Default::default() },
+        WindowRule { app_id: "org.example.Elsewhere".into(), workspace: Some(3), on_top: Some(true), ..Default::default() },
+        WindowRule { app_id: "org.example.Corner".into(), position: Some([40, 60]), ..Default::default() },
+        WindowRule { title: "e2e".into(), maximize: Some(true), app_id: "".into(), ..Default::default() },
+    ];
+    let socket = ListeningSocket::bind("fde-e2e-rules").unwrap();
+    let mut hn = Harness { display, state, socket, ordinary_clients: false };
+    let open_named = |hn: &mut Harness, app: &'static str| {
+        let (tx, rx) = mpsc::channel();
+        let path = dir.path().join("fde-e2e-rules");
+        std::thread::spawn(move || named_client(path, tx, app, 240, 160));
+        let t0 = Instant::now();
+        loop {
+            hn.pump();
+            if let Ok(Msg::Mapped { .. }) = rx.try_recv() {
+                break;
+            }
+            assert!(t0.elapsed() < Duration::from_secs(10), "no window");
+            std::thread::sleep(Duration::from_millis(3));
+        }
+        hn.pump_for(80);
+    };
+    let pending = |w: &smithay::desktop::Window| w.toplevel().unwrap().with_pending_state(|s| s.size);
+
+    // tiling mode on: a window of the first rule floats, has the size asked for, in the middle
+    hn.state.toggle_tiling();
+    open_named(&mut hn, "org.example.FloatingTool");
+    let tool = hn.state.space.elements().last().cloned().unwrap();
+    assert_eq!(pending(&tool).map(|s| (s.w, s.h)), Some((500, 300)), "the size from the rule");
+    assert!(!hn.state.tiled_now().contains(&tool), "float = true: not in the layout");
+    let outer = hn.state.outer_of(&tool).unwrap();
+    let area = hn.state.usable_area(&hn.state.output.clone());
+    let mid = (area.loc.x + area.size.w / 2, area.loc.y + area.size.h / 2);
+    let (cx, cy) = (hn.state.space.element_location(&tool).unwrap().x + 250, hn.state.space.element_location(&tool).unwrap().y + 150);
+    assert!((cx - mid.0).abs() < 12 && (cy - mid.1).abs() < 40, "in the middle: {cx},{cy} against {mid:?} ({outer:?})");
+
+    // another program is not touched by that rule and is tiled
+    open_named(&mut hn, "org.example.Plain");
+    let plain = hn.state.space.elements().last().cloned().unwrap();
+    hn.state.retile();
+    assert!(hn.state.tiled_now().contains(&plain), "no rule: tiled as usual");
+    assert!(!hn.state.tiled_now().contains(&tool), "and the floating one still is not");
+
+    // a rule with a workspace sends the window there (and keeps it on top)
+    open_named(&mut hn, "org.example.Elsewhere");
+    assert!(!hn.state.space.elements().any(|w| hn.state.window_workspace_of(w) == 0 && w.toplevel().and_then(|_| fde::placement::app_id(w)).as_deref() == Some("org.example.Elsewhere")), "not on this workspace");
+    hn.state.switch_workspace(2);
+    let there = hn.state.space.elements().find(|w| fde::placement::app_id(w).as_deref() == Some("org.example.Elsewhere")).cloned();
+    let there = there.expect("it is on workspace 3");
+    assert_eq!(hn.state.window_workspace_of(&there), 2);
+    assert!(hn.state.is_on_top(&there), "on_top = true");
+    hn.state.switch_workspace(0);
+    hn.state.toggle_tiling();
+
+    // a position (outer top left on the first monitor)
+    open_named(&mut hn, "org.example.Corner");
+    let corner = hn.state.space.elements().last().cloned().unwrap();
+    let o = hn.state.outer_of(&corner).unwrap();
+    assert_eq!((o.loc.x, o.loc.y), (40, 60), "position = [40, 60]");
+
+    // a rule by title: maximized (the plain test client is called "e2e")
+    open_window(&mut hn, dir.path(), "fde-e2e-rules", 200, 120);
+    let titled = hn.state.space.elements().last().cloned().unwrap();
+    assert!(hn.state.is_maximized(&titled), "maximize = true by title");
+    hn.state.set_maximized(&titled, false);
+
+    // a bad rule is refused by the configuration check
+    let bad = "[[rules]]\nworkspace = 2\n";
+    assert!(fde::config::Config::parse(bad).is_err(), "a rule that names nothing");
+    assert!(fde::config::Config::parse("[[rules]]\napp_id = \"x\"\nsize = [1, 1]\n").is_err());
+    let good = fde::config::Config::parse("[[rules]]\napp_id = \"pavucontrol\"\nfloat = true\nsize = [700, 500]\ncenter = true\n").unwrap();
+    assert_eq!(good.rules.len(), 1);
+    assert_eq!(good.rules[0].size, Some([700, 500]));
+    std::env::remove_var("XDG_STATE_HOME");
+}
+
+#[test]
 fn a_wallpaper_picture_from_the_configuration_is_what_the_monitor_shows() {
     let dir = tempfile::tempdir().unwrap();
     let _guard = SERIAL.lock().unwrap_or_else(|e| e.into_inner());

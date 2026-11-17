@@ -96,7 +96,7 @@ issue. See [docs/HARDWARE.md](docs/HARDWARE.md).
 
 Everything is in one file, `~/.config/fde/fde.toml`, which you can edit by hand or with
 `fde-settings`. Changes apply while FDE runs. See
-[docs/fde.example.toml](docs/fde.example.toml) for every option.
+[docs/fde.example.toml](docs/fde.example.toml) for every option, including window rules (`[[rules]]`: always float a program, open it on workspace 3, centred at 700 x 500 ...).
 
 ## Build
 
