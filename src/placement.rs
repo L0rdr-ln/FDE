@@ -101,6 +101,7 @@ pub fn app_id(window: &Window) -> Option<String> {
 impl Fde {
     /// The session ends: write down which programs are open, for the next session to start.
     pub fn save_session(&self) {
+        crate::sounds::play(crate::sounds::Event::Logout);
         if !self.config.session.restore {
             return;
         }

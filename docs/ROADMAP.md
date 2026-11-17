@@ -29,7 +29,7 @@ is the first thing to do (see "Next").
       direct scanout, multi-GPU laptops
 - [x] hot corner for the overview (`shell.hot_corner`), drag windows to a workspace in the overview
 - [x] window rules (`[[rules]]`: float, size, position, centre, workspace, on top, maximize)
-- [ ] session restore
+- [x] session restore (`session.restore`: the programs that were open come back; their workspaces and window groups do not yet)
 
 ## Shell
 - [x] `fde-panel`: task bar (start orb, task list, clock, workspace dots, volume and battery),
@@ -57,7 +57,7 @@ is the first thing to do (see "Next").
       `assets/wallpapers/README.md`; only free-to-use pictures)
 - [ ] the mascot picture (brief and prompt: `docs/MASCOT.md`)
 - [x] GTK4 / GTK3 and Qt styling from the theme, an icon theme of its own (about 130 icons)
-- [ ] sounds
+- [x] event sounds (`[sounds]`; a CC0 notification and volume sound ship, startup and logout are yours to add)
 - [ ] file manager, a portal backend of its own, installer / one-command setup
 - [ ] packaging (Debian / Arch), accessibility basics (high contrast, screen reader)
 

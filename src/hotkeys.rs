@@ -54,6 +54,7 @@ pub fn volume(inbox: &Inbox, delta: i32) {
     let inbox = inbox.clone();
     std::thread::spawn(move || {
         crate::status::change_volume(delta);
+        crate::sounds::play(crate::sounds::Event::Volume);
         match crate::status::volume() {
             Some(v) if v.muted => say(&inbox, "Volume: muted".into()),
             Some(v) => say(&inbox, format!("Volume: {}%", v.percent)),

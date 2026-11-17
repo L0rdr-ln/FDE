@@ -27,9 +27,10 @@ else root="$(cd "$here/.." && pwd)"; bin="$root/target/release"; share="$root/as
 [ -x "$bin/fde" ] || { echo "no fde in $bin (build first: cargo build --release --workspace)"; exit 1; }
 
 # the compositor and its programs side by side: FDE trusts its own programs only next to itself
-mkdir -p "$prefix/bin" "$prefix/share/fde/wallpapers" "$prefix/share/applications" "$prefix/share/icons"
+mkdir -p "$prefix/bin" "$prefix/share/fde/wallpapers" "$prefix/share/fde/sounds" "$prefix/share/applications" "$prefix/share/icons"
 # the icon theme (also used by GTK and Qt programs through the files FDE writes)
 rm -rf "$prefix/share/icons/FDE" && cp -r "$data/icons/FDE" "$prefix/share/icons/FDE"
+[ -d "$data/sounds" ] && find "$data/sounds" -maxdepth 1 -type f ! -name '*.md' -exec install -m 644 {} "$prefix/share/fde/sounds/" \;
 for p in fde fde-panel fde-lock fde-greeter fde-notify fde-tray fde-shot fde-settings fde-music; do
     [ -x "$bin/$p" ] && install -m 755 "$bin/$p" "$prefix/bin/$p"
 done

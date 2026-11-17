@@ -114,6 +114,21 @@ pub fn parse_clock(s: &str) -> Option<u32> {
     (h < 24 && m < 60).then_some(h * 60 + m)
 }
 
+/// Short sounds for events (data/sounds).
+#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[serde(default)]
+pub struct Sounds {
+    pub enabled: bool,
+    /// 0 (silent) .. 1 (full)
+    pub volume: f32,
+}
+
+impl Default for Sounds {
+    fn default() -> Self {
+        Sounds { enabled: false, volume: 0.6 }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(default)]
 pub struct Music {
@@ -236,6 +251,7 @@ pub struct Config {
     pub appearance: Appearance,
     pub wallpaper: Wallpaper,
     pub music: Music,
+    pub sounds: Sounds,
     pub input: Input,
     pub shell: Shell,
     pub session: Session,

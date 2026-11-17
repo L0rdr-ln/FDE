@@ -26,6 +26,10 @@ cursor_size = 0        # pixels at scale 1; 0 = $XCURSOR_SIZE, else 24
 path = ""              # a PNG, JPEG or WebP file; empty = the built-in sky
 mode = "fill"          # fill (cover, crop) | fit (all of it, black bars) | stretch | center | tile
 
+[sounds]
+enabled = false         # short sounds for the start of the session, notifications, volume changes and logout
+volume = 0.6            # 0 .. 1 (files: ~/.local/share/fde/sounds/{startup,logout,notification,volume}.oga|ogg|opus|wav)
+
 [music]
 enabled = false        # background music from your own files, played by fde-music
 path = ""              # a music file or a folder (mp3, ogg, flac, wav, m4a, aac, opus)

@@ -43,6 +43,7 @@ pub mod screencopy;
 pub mod security;
 pub mod selftest;
 pub mod session;
+pub mod sounds;
 pub mod shell;
 pub mod shm;
 pub mod status;

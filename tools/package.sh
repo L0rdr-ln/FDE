@@ -17,6 +17,7 @@ strip "$out"/bin/* 2>/dev/null || true
 find assets/wallpapers -maxdepth 1 -type f -exec install -m 644 {} "$out/share/fde/wallpapers/" \;
 install -m 644 data/fde.desktop data/fde-portals.conf "$out/data/"
 cp -r data/icons "$out/data/icons"
+cp -r data/sounds "$out/data/sounds"
 install -m 755 tools/install.sh tools/start-fde "$out/"
 install -m 644 README.md LICENSE SECURITY.md "$out/"
 install -m 644 docs/HARDWARE.md docs/fde.example.toml "$out/docs/"

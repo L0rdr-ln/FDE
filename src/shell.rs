@@ -65,6 +65,7 @@ pub fn export_environment() {
 /// `FDE_NO_NOTIFY=1` skips the daemon; `FDE_AUTOSTART` may name one more program.
 pub fn start_other_clients(config: &crate::config::Config) {
     export_environment();
+    crate::sounds::play(crate::sounds::Event::Startup);
     // the theme's colours for GTK and Qt programs (they read them when they start)
     apply_app_style_in_background(config.clone());
     if config.shell.polkit_agent && std::env::var_os("FDE_NO_POLKIT").is_none() {
