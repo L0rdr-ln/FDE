@@ -486,4 +486,26 @@ mod tests {
         assert!(check_size(100_000, 100_000).is_err());
         assert!(check_size(u32::MAX as u64, u32::MAX as u64).is_err());
     }
+
+    /// Every picture FDE ships for a theme can be read, is big enough for a monitor, and has its
+    /// source and licence written down (a picture without them must not be in the repository).
+    #[test]
+    fn the_shipped_theme_pictures_are_readable_big_and_have_a_licence_line() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("assets/wallpapers");
+        let readme = std::fs::read_to_string(dir.join("README.md")).unwrap();
+        let licence_table: &str = readme.split("## Licences").nth(1).expect("a Licences section");
+        let mut found = 0;
+        for e in std::fs::read_dir(&dir).unwrap().flatten() {
+            let path = e.path();
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.ends_with(".md") {
+                continue;
+            }
+            found += 1;
+            assert!(licence_table.contains(&format!("`{name}`")), "{name} has no line in the licence table of assets/wallpapers/README.md");
+            let img = load_image(&path).unwrap_or_else(|e| panic!("{name}: {e}"));
+            assert!(img.width >= 2560 && img.height >= 1440, "{name} is {}x{}: too small for a monitor", img.width, img.height);
+        }
+        assert!(found >= 3, "aqua, dorific and metro are there: {found}");
+    }
 }
