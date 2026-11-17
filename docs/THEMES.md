@@ -11,6 +11,7 @@ A theme is one small TOML file. FDE comes with the six members of the Frutiger f
 | `dorific` | Dorific: the warm one, glossy orange glass, cream and sunset gradients |
 | `vector-flourish` | Vector Flourish: light and airy, white and pastel glass |
 | `aqua` | Frutiger Aqua: water and aquariums, cyan-teal glass, a wallpaper that deepens like the sea |
+| `high-contrast` | High Contrast: black and yellow, opaque, thick borders, no effects (accessibility) |
 
 These are homages drawn from scratch to match how the looks are remembered. They use no artwork
 from the original systems, and the wallpapers are plain gradients until real pictures are added: see

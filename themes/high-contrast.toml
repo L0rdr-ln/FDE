@@ -1,0 +1,32 @@
+name = "High Contrast"
+description = "Plain black and yellow, no transparency, thick borders: easy to read on any screen."
+accent = "#ffd400"
+transparency = 0.97
+blur = 0
+gloss = 0.0
+radius = 4
+border = 5
+titlebar = 34
+client_tint = [0.0, 0.0, 0.0, 0.0]
+highlight = 0.0
+reflections = 0.0
+glow = 0.0
+shadow = 0.6
+rim = 1.0
+title_ink = "#000000"
+title_ink_dim = "#202020"
+title_glow = 0.0
+
+[buttons]
+style = "capsule"
+size = 20
+gap = 3
+margin = 7
+close = "#ff3b30"
+maximize = "#00e060"
+minimize = "#ffffff"
+
+[wallpaper]
+kind = "solid"
+color = "#000000"
+color2 = "#000000"

@@ -122,6 +122,7 @@ pub const BUILTIN: &[(&str, &str)] = &[
     ("dorific", include_str!("../themes/dorific.toml")),
     ("vector-flourish", include_str!("../themes/vector-flourish.toml")),
     ("aqua", include_str!("../themes/aqua.toml")),
+    ("high-contrast", include_str!("../themes/high-contrast.toml")),
 ];
 
 fn dirs() -> Vec<PathBuf> {
@@ -270,7 +271,7 @@ mod tests {
         let aero = Theme::find("aero").unwrap();
         let d = Theme::default();
         assert_eq!((aero.accent.as_str(), aero.radius, aero.border, aero.titlebar), (d.accent.as_str(), d.radius, d.border, d.titlebar));
-        assert_eq!(BUILTIN.len(), 6);
+        assert_eq!(BUILTIN.len(), 7);
     }
 
     #[test]

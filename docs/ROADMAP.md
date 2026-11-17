@@ -45,7 +45,7 @@ is the first thing to do (see "Next").
 - [x] laptop keys: volume, brightness, media; the screen dims and goes black when idle (no DPMS yet)
 - [x] pinned programs and one task bar button per program
 - [x] system tray (StatusNotifierItem, with the programs' dbusmenu menus)
-- [ ] Bluetooth status, an on-screen display
+- [x] Bluetooth status and device flyout, an on-screen display for volume and brightness
 - [~] a greeter (greetd): `fde-greeter`, tested against a stand-in greetd only
 
 ## Desktop suite
@@ -59,7 +59,7 @@ is the first thing to do (see "Next").
 - [x] GTK4 / GTK3 and Qt styling from the theme, an icon theme of its own (about 130 icons)
 - [x] event sounds (`[sounds]`; a CC0 notification and volume sound ship, startup and logout are yours to add)
 - [ ] file manager, a portal backend of its own, installer / one-command setup
-- [ ] packaging (Debian / Arch), accessibility basics (high contrast, screen reader)
+- [ ] packaging (Debian / Arch), accessibility basics (high contrast theme done; screen reader not)
 
 ## Next
 1. Run the VM script (`tools/vm-setup.sh`), then `fde --check` and `fde --selftest`, and report what
