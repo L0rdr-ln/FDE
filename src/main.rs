@@ -9,6 +9,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         fde::check::run_checks(std::path::Path::new("/sys")).print();
         return Ok(());
     }
+    // the theme's colours for GTK and Qt programs, once (what the session does at its start)
+    if matches!(args.get(1).map(String::as_str), Some("--apply-style") | Some("apply-style")) {
+        let outcomes = fde::appstyle::apply_current();
+        if outcomes.is_empty() {
+            println!("appearance.style_apps is off (or there is no configuration folder): nothing written");
+        }
+        for o in outcomes {
+            let what = match &o.what {
+                fde::appstyle::What::Wrote => "wrote".to_string(),
+                fde::appstyle::What::Unchanged => "already right".to_string(),
+                fde::appstyle::What::Skipped(why) => format!("left alone: {why}"),
+            };
+            println!("{}: {what}", o.path.display());
+        }
+        return Ok(());
+    }
     // every effect drawn off-screen on this computer's graphics driver
     if matches!(args.get(1).map(String::as_str), Some("--selftest") | Some("selftest")) {
         let report = fde::selftest::run();
@@ -52,7 +68,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         _ => {
-            eprintln!("usage: fde [winit|drm]        run nested in a window (winit) or on the hardware (drm); default: by environment\n       fde --check           what FDE would find (GPU, monitors, seat, programs); changes nothing\n       fde --selftest        draw every effect off-screen and check the pixels (does this GPU do it right?)\n       fde glass-demo [out.png]");
+            eprintln!("usage: fde [winit|drm]        run nested in a window (winit) or on the hardware (drm); default: by environment\n       fde --check           what FDE would find (GPU, monitors, seat, programs); changes nothing\n       fde --apply-style     write the theme's colours for GTK and Qt programs (the session does it at its start)\n       fde --selftest        draw every effect off-screen and check the pixels (does this GPU do it right?)\n       fde glass-demo [out.png]");
             std::process::exit(2);
         }
     }

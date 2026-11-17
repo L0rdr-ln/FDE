@@ -14,7 +14,7 @@ pub struct Icon {
 }
 
 /// Icon themes looked at, in order (hicolor holds what applications install).
-const THEMES: &[&str] = &["hicolor", "Adwaita", "breeze", "Papirus", "elementary", "Humanity", "gnome"];
+const THEMES: &[&str] = &["hicolor", "FDE", "Adwaita", "breeze", "Papirus", "elementary", "Humanity", "gnome"];
 const SIZES: &[i32] = &[16, 22, 24, 32, 36, 48, 64, 96, 128, 192, 256, 512];
 
 fn data_dirs() -> Vec<PathBuf> {
@@ -27,8 +27,13 @@ fn data_dirs() -> Vec<PathBuf> {
             }
         }
     }
+    // the icons that come with FDE, where this build was made (for running from a source tree)
+    let shipped = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/data"));
     let sys = std::env::var("XDG_DATA_DIRS").unwrap_or_else(|_| "/usr/local/share:/usr/share".into());
     v.extend(sys.split(':').filter(|d| !d.is_empty()).map(PathBuf::from));
+    if shipped.is_dir() {
+        v.push(shipped);
+    }
     v
 }
 
@@ -50,7 +55,7 @@ pub fn find_in(dirs: &[PathBuf], name: &str, px: i32) -> Option<PathBuf> {
     bigger.sort();
     let mut smaller: Vec<i32> = SIZES.iter().copied().filter(|&s| s < px).collect();
     smaller.sort_by(|a, b| b.cmp(a));
-    const SUBS: [&str; 7] = ["apps", "categories", "places", "devices", "mimetypes", "legacy", "actions"];
+    const SUBS: [&str; 8] = ["apps", "categories", "places", "devices", "mimetypes", "legacy", "actions", "status"];
     // themes keep sizes as "48x48/apps" (hicolor, Adwaita) or "apps/48" (Humanity, elementary)
     let png = |sizes: &[i32]| -> Option<PathBuf> {
         for theme in THEMES {
@@ -273,5 +278,68 @@ mod tests {
         let svg = load(&find_in(&dirs, "vector", 24).unwrap(), 24).unwrap();
         let mid = ((12 * 24 + 12) * 4) as usize;
         assert_eq!(&svg.rgba[mid..mid + 4], &[255, 0, 0, 255], "the SVG is drawn");
+    }
+
+    /// Every icon of the FDE theme draws something: not blank, not a flat square, and the common
+    /// names are found through the ordinary lookup. `FDE_ICON_SHEET=<file.png>` writes a contact sheet.
+    #[test]
+    fn the_fde_icon_theme_draws_and_is_found() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("data/icons/FDE");
+        let mut all: Vec<PathBuf> = Vec::new();
+        for sub in std::fs::read_dir(root.join("scalable")).unwrap().flatten() {
+            for f in std::fs::read_dir(sub.path()).unwrap().flatten() {
+                if f.path().extension().is_some_and(|e| e == "svg") {
+                    all.push(f.path());
+                }
+            }
+        }
+        all.sort();
+        assert!(all.len() >= 100, "{} icons", all.len());
+        let mut sheet: Vec<Icon> = Vec::new();
+        let mut seen: std::collections::HashSet<Vec<u8>> = std::collections::HashSet::new();
+        for p in &all {
+            let ic = load(p, 64).unwrap_or_else(|| panic!("{} does not load", p.display()));
+            let opaque = ic.rgba.chunks(4).filter(|px| px[3] > 200).count();
+            let clear = ic.rgba.chunks(4).filter(|px| px[3] < 10).count();
+            assert!(opaque > 64 * 64 / 5, "{}: hardly anything is drawn ({opaque} solid pixels)", p.display());
+            assert!(clear > 100, "{}: it fills the whole square (no transparent corners)", p.display());
+            // the glyph: pixels near white somewhere inside (a tile without a glyph is a blank tile)
+            let bright = ic.rgba.chunks(4).filter(|px| px[3] > 200 && px[0] > 235 && px[1] > 235 && px[2] > 235).count();
+            let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("");
+            let own_shape = stem.starts_with("folder") || stem.starts_with("inode-") || stem.starts_with("dialog-");
+            assert!(bright > 40 || own_shape, "{}: no glyph ({bright})", p.display());
+            seen.insert(ic.rgba.clone());
+            sheet.push(ic);
+        }
+        assert!(seen.len() >= 45, "{} different pictures: the icons are meant to differ", seen.len());
+        // the lookup finds them by their names, after the icons applications bring themselves
+        let dirs = vec![Path::new(env!("CARGO_MANIFEST_DIR")).join("data")];
+        for name in ["utilities-terminal", "system-file-manager", "folder", "user-home", "system-shutdown", "dialog-warning", "audio-volume-muted"] {
+            let p = find_in(&dirs, name, 48).unwrap_or_else(|| panic!("{name} not found"));
+            assert!(p.to_string_lossy().contains("icons/FDE/"), "{name}: {}", p.display());
+        }
+        if let Some(out) = std::env::var_os("FDE_ICON_SHEET") {
+            let cols = 12usize;
+            let rows = sheet.len().div_ceil(cols);
+            let (w, h) = (cols * 72, rows * 72);
+            let mut px = vec![0u8; w * h * 4];
+            for c in px.chunks_mut(4) {
+                c.copy_from_slice(&[0xcf, 0xe6, 0xff, 255]);
+            }
+            for (i, ic) in sheet.iter().enumerate() {
+                let (ox, oy) = ((i % cols) * 72 + 4, (i / cols) * 72 + 4);
+                for y in 0..64 {
+                    for x in 0..64 {
+                        let s = &ic.rgba[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4];
+                        let d = ((oy + y) * w + ox + x) * 4;
+                        let inv = 255 - s[3] as u32;
+                        for k in 0..3 {
+                            px[d + k] = (s[k] as u32 + px[d + k] as u32 * inv / 255) as u8;
+                        }
+                    }
+                }
+            }
+            crate::demo::write_png(out.to_str().unwrap(), &px, w as i32, h as i32, false).unwrap();
+        }
     }
 }

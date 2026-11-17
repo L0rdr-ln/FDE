@@ -27,6 +27,8 @@ pub struct Appearance {
     /// windows bend and swing on springs while they are dragged
     pub wobbly_windows: bool,
     /// how a minimized window goes to the task bar: `lamp` (poured into its button like a genie) or `shrink`
+    /// write the theme's colours where GTK and Qt programs look for them (only files marked fde-managed, or new ones)
+    pub style_apps: bool,
     /// soap bubbles drift up behind the windows (off by default: they keep the screen redrawing)
     pub bubbles: bool,
     /// a ring spreads from every click
@@ -50,7 +52,7 @@ pub struct Appearance {
 
 impl Default for Appearance {
     fn default() -> Self {
-        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.46, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, bubbles: false, click_ripples: true, minimize_effect: "lamp".into(), open_effect: "unfold".into(), workspace_effect: "cube".into(), switcher_effect: "flip3d".into(), close_effect: "shatter".into(), performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
+        Appearance { theme: "aero".into(), accent: "#4aa8ee".into(), transparency: 0.46, blur: 3, gloss: 0.8, animations: true, wobbly_windows: true, style_apps: true, bubbles: false, click_ripples: true, minimize_effect: "lamp".into(), open_effect: "unfold".into(), workspace_effect: "cube".into(), switcher_effect: "flip3d".into(), close_effect: "shatter".into(), performance: "auto".into(), cursor_theme: String::new(), cursor_size: 0 }
     }
 }
 

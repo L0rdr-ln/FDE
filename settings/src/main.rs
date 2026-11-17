@@ -193,6 +193,13 @@ fn appearance_page(cfg: &Config, status: &Status) -> GBox {
     let st3 = status.clone();
     wobbly.connect_active_notify(move |sw| st3.report(config::set(&path(), &model::wobbly(sw.is_active()))));
     body.append(&row("Wobbly windows", &wobbly));
+    // GTK and Qt programs in the theme's colours
+    let style_apps = gtk4::Switch::new();
+    style_apps.set_active(a.style_apps);
+    style_apps.set_halign(Align::Start);
+    let st9 = status.clone();
+    style_apps.connect_active_notify(move |sw| st9.report(config::set(&path(), &model::style_apps(sw.is_active()))));
+    body.append(&row("Style other programs (GTK, Qt: restart them to see it)", &style_apps));
     // bubbles and ripples
     let bubbles = gtk4::Switch::new();
     bubbles.set_active(a.bubbles);

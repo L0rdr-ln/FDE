@@ -198,6 +198,7 @@ impl Fde {
                 self.panels.push((o.name(), child));
             }
         }
+        self.style_apps_live = true;
         crate::shell::start_other_clients(&self.config);
         self.write_outputs_state();
         self.write_workspace_state();

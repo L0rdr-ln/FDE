@@ -11,6 +11,7 @@ gloss = 0.8            # gloss band on the title bar, 0 .. 1
 performance = "auto"   # auto: "fast" when the graphics are software-drawn (a VM without 3D); "quality" or "fast" (one blur pass, no shadows, no wobble)
 wobbly_windows = true  # windows bend and swing on springs while you drag them
 minimize_effect = "lamp"   # "lamp" (poured into the task bar button, and out again) or "shrink"
+style_apps = true         # write the theme's colours for GTK and Qt programs (only files marked fde-managed, or new ones)
 bubbles = false           # soap bubbles drift up behind the windows (the screen then redraws all the time)
 click_ripples = true      # a ring spreads from every click
 open_effect = "unfold"      # "unfold" (rolls down from the title bar) or "pop" (fades in)

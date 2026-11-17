@@ -96,6 +96,11 @@ pub fn hot_corner(on: bool) -> Vec<(&'static str, Setting)> {
     vec![("shell.hot_corner", Setting::Bool(on))]
 }
 
+/// Style GTK and Qt programs with the theme (appearance.style_apps).
+pub fn style_apps(on: bool) -> Vec<(&'static str, Setting)> {
+    vec![("appearance.style_apps", Setting::Bool(on))]
+}
+
 pub fn wallpaper(path: &str, mode: &str) -> Vec<(&'static str, Setting)> {
     vec![("wallpaper.path", Setting::Str(path.trim().to_string())), ("wallpaper.mode", Setting::Str(mode.to_string()))]
 }

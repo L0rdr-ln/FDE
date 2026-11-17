@@ -96,3 +96,25 @@ with them). The accent colour of the task bar and start menu is taken from the m
 What is not used: the window icon and the shade, desktop and sticky buttons, on-screen-display colours, the
 gradients of the menu (its flat colours are used), and the theme's font. Frames in an Openbox theme are flat
 pictures: no blur, no shadow, no glass.
+
+## Other programs and the icon theme
+
+FDE does not only dress its own windows. At the start of a session, and whenever the theme or accent changes,
+it writes the theme's colours where GTK4, GTK3 and Qt programs look for them:
+
+| file | what it does |
+|---|---|
+| `~/.config/gtk-4.0/gtk.css`, `gtk-3.0/gtk.css` | libadwaita's named colours (`accent_bg_color`, `window_bg_color`, ...) and glossy header bars, buttons, entries, switches |
+| `~/.config/gtk-4.0/settings.ini`, `gtk-3.0/settings.ini` | the icon theme (FDE) and the cursor theme |
+| `~/.config/qt5ct/colors/fde.conf`, `qt6ct/...`, and `qt5ct.conf`, `qt6ct.conf` if there are none | a Qt colour scheme (install `qt5ct` or `qt6ct`; `start-fde` selects it) |
+
+A file is only written when it does not exist yet or when its first lines say `fde-managed`: a file you wrote
+yourself is never touched (delete the marker line to take a file over). `fde --apply-style` does it once from a
+terminal and says what it did to each file; `appearance.style_apps = false` (or the switch in Settings) turns it off.
+Programs read these files when they start, so restart them after a theme change.
+
+The **FDE icon theme** (`data/icons/FDE`, installed to `share/icons/FDE`) has about 130 glossy glass icons for the
+common names (terminal, file manager, folders, browser, mail, settings, lock, log out, sleep, restart, shut down,
+network, volume, battery, dialogs, file types and the application categories). Programs' own icons win; the FDE
+icons come before Adwaita for everything else. `python3 tools/make-icons.py` draws them again (the SVGs are kept in
+the repository, so nothing needs building).

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+<defs>
+<linearGradient id="g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#fff" stop-opacity=".75"/><stop offset="1" stop-color="#fff" stop-opacity=".05"/></linearGradient>
+<filter id="s" x="-20%" y="-20%" width="140%" height="150%"><feGaussianBlur in="SourceAlpha" stdDeviation="2.5"/><feOffset dy="3"/><feComponentTransfer><feFuncA type="linear" slope=".4"/></feComponentTransfer><feMerge><feMergeNode/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+</defs>
+<g filter="url(#s)"><path d="M14 34 a8 8 0 0 1 8 -8 h30 l10 11 h44 a8 8 0 0 1 8 8 v8 H14 Z" fill="#d98a14"/>
+<path d="M14 46 a8 8 0 0 1 8 -8 h84 a8 8 0 0 1 8 8 v50 a8 8 0 0 1 -8 8 h-84 a8 8 0 0 1 -8 -8 Z" fill="#ffc542"/>
+<path d="M14 46 a8 8 0 0 1 8 -8 h84 a8 8 0 0 1 8 8 v4 H14 Z" fill="#fff" fill-opacity=".45"/>
+<path d="M22 38 h84 a8 8 0 0 1 8 8 v50 a8 8 0 0 1 -8 8 h-84 a8 8 0 0 1 -8 -8 v-50 a8 8 0 0 1 8 -8 Z" fill="none" stroke="#fff" stroke-opacity=".5" stroke-width="1.5"/>
+<g fill="#fff" transform="translate(32 40) scale(.5)"></g></g>
+</svg>

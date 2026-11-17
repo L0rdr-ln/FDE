@@ -36,7 +36,7 @@ wlroots can't read back what is behind a window, so it can't do this.
 - **Task bar and start menu** (`fde-panel`): window list, pinned programs, app search, volume, network, battery, calendar and a notification history
 - **Notifications** (`fde-notify`), **lock screen** (`fde-lock`), **login screen** (`fde-greeter`) and **screenshots** (`fde-shot`)
 - **Settings app** (`fde-settings`): a GTK4 control panel, and the desktop updates as you change things
-- **Themes:** Frutiger Aero, Aqua, Eco, Metro, Dorific and Vector Flourish, your own, or any Openbox theme (`openbox:NAME`; [docs/THEMES.md](docs/THEMES.md))
+- **Themes:** Frutiger Aero, Aqua, Eco, Metro, Dorific and Vector Flourish, your own, GTK and Qt programs in the same colours, a glossy icon theme of its own, or any Openbox theme (`openbox:NAME`; [docs/THEMES.md](docs/THEMES.md))
 - **Security:** ordinary programs can't capture the screen or touch other windows ([SECURITY.md](SECURITY.md))
 
 **Status:** everything is tested with software GL and real Wayland/X11 clients, but nothing has

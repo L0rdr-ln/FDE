@@ -144,6 +144,8 @@ pub struct Fde {
     /// clicks that spread a ring: where (shared space) and when
     /// the left button is down (the Openbox button look for "pressed")
     pub button_down: bool,
+    /// a real session (not a test): a theme change is written out for GTK and Qt programs
+    pub style_apps_live: bool,
     /// the pointer has been in the hot corner since this moment, and may open the overview again
     pub corner_since: Option<Instant>,
     pub corner_armed: bool,
@@ -417,6 +419,7 @@ impl Fde {
             screencopy: Default::default(),
             wobbles: Vec::new(),
             button_down: false,
+            style_apps_live: false,
             corner_since: None,
             corner_armed: true,
             ripples: Vec::new(),
@@ -514,6 +517,9 @@ impl Fde {
         tracing::info!("configuration reloaded");
         self.request_redraw();
         new.apply_style(&mut self.style);
+        if self.style_apps_live && new.appearance != self.config.appearance {
+            crate::shell::apply_app_style_in_background(new.clone());
+        }
         self.ob_theme = new.openbox_theme();
         self.ob_frames.clear();
         if std::env::var_os("FDE_TERMINAL").is_none() {

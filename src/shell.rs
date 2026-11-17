@@ -65,6 +65,8 @@ pub fn export_environment() {
 /// `FDE_NO_NOTIFY=1` skips the daemon; `FDE_AUTOSTART` may name one more program.
 pub fn start_other_clients(config: &crate::config::Config) {
     export_environment();
+    // the theme's colours for GTK and Qt programs (they read them when they start)
+    apply_app_style_in_background(config.clone());
     if config.shell.polkit_agent && std::env::var_os("FDE_NO_POLKIT").is_none() {
         match find_polkit_agent(POLKIT_AGENTS) {
             Some(agent) => {
@@ -175,4 +177,22 @@ pub fn start_greeter() {
         Some(Err(e)) => tracing::error!("cannot start fde-greeter: {e}"),
         None => tracing::error!("fde-greeter is not installed next to the compositor"),
     }
+}
+
+/// Write the theme's colours for GTK and Qt programs (`appearance.style_apps`), without holding up
+/// the compositor.
+pub fn apply_app_style_in_background(config: crate::config::Config) {
+    if !config.appearance.style_apps || greeter_mode() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let Some(home) = crate::appstyle::config_home() else { return };
+        for o in crate::appstyle::apply(&config, &home) {
+            match &o.what {
+                crate::appstyle::What::Wrote => tracing::info!("styled {}", o.path.display()),
+                crate::appstyle::What::Skipped(why) => tracing::debug!("not styling {}: {why}", o.path.display()),
+                crate::appstyle::What::Unchanged => {}
+            }
+        }
+    });
 }
